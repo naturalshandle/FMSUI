@@ -1,0 +1,721 @@
+{
+  "info": {
+    "name": "FMSBE API",
+    "_postman_id": "b3f2a6e0-1a2b-4c3d-9e5f-fmsbe00000001",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Naturals FMSBE backend API collection. Set base_url and access_token collection variables."
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" },
+    { "key": "mfa_token", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [ { "key": "token", "value": "{{access_token}}", "type": "string" } ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password123!\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api","v1","auth","login"] }
+          }
+        },
+        {
+          "name": "Verify MFA",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"mfaToken\": \"{{mfa_token}}\",\n  \"code\": \"123456\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/mfa/verify", "host": ["{{base_url}}"], "path": ["api","v1","auth","mfa","verify"] }
+          }
+        },
+        {
+          "name": "Setup MFA",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/mfa/setup", "host": ["{{base_url}}"], "path": ["api","v1","auth","mfa","setup"] }
+          }
+        },
+        {
+          "name": "Enable MFA",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"123456\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/mfa/enable", "host": ["{{base_url}}"], "path": ["api","v1","auth","mfa","enable"] }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/refresh", "host": ["{{base_url}}"], "path": ["api","v1","auth","refresh"] }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/logout", "host": ["{{base_url}}"], "path": ["api","v1","auth","logout"] }
+          }
+        },
+        {
+          "name": "Activate Account",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"activation-token\",\n  \"password\": \"Password123!\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/activate", "host": ["{{base_url}}"], "path": ["api","v1","auth","activate"] }
+          }
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"user@example.com\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/forgot-password", "host": ["{{base_url}}"], "path": ["api","v1","auth","forgot-password"] }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"reset-token\",\n  \"password\": \"NewPassword123!\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/auth/reset-password", "host": ["{{base_url}}"], "path": ["api","v1","auth","reset-password"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Users",
+      "item": [
+        {
+          "name": "Create User",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"newuser@example.com\",\n  \"fullName\": \"Jane Doe\",\n  \"phone\": \"9876543210\",\n  \"roleName\": \"FRANCHISEE\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/users", "host": ["{{base_url}}"], "path": ["api","v1","admin","users"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Franchisees (Self-Service)",
+      "item": [
+        {
+          "name": "Create Franchisee",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"prefix\": \"Mr.\",\n  \"fullName\": \"Ravi Kumar\",\n  \"franchiseeType\": \"INDIVIDUAL\",\n  \"contact\": \"9876543210\",\n  \"dateOfBirth\": \"1990-05-15\",\n  \"email\": \"ravi.kumar@example.com\",\n  \"pan\": \"ABCDE1234F\",\n  \"aadhaar\": \"123456789012\",\n  \"address\": \"123 Main St, Chennai\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/franchisees", "host": ["{{base_url}}"], "path": ["api","v1","franchisees"] }
+          }
+        },
+        {
+          "name": "Get Franchisee",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:id", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Franchisee",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Ravi Kumar Updated\",\n  \"contact\": \"9876500000\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:id", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Submit Franchisee Profile",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:id/submit", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":id","submit"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "List Profile Sections",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:id/sections", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":id","sections"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Get Section History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:id/sections/:section/history", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":id","sections",":section","history"], "variable": [ { "key": "id", "value": "1" }, { "key": "section", "value": "FRANCHISEE_INFO" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Franchisee Relations",
+      "item": [
+        {
+          "name": "List Relations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:franchiseeId/relations", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":franchiseeId","relations"], "variable": [ { "key": "franchiseeId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Create Relation",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Priya Kumar\",\n  \"relationType\": \"SPOUSE\",\n  \"dateOfBirth\": \"1992-03-20\",\n  \"anniversaryDate\": \"2015-11-10\",\n  \"phone\": \"9876543211\",\n  \"consentGiven\": true\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:franchiseeId/relations", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":franchiseeId","relations"], "variable": [ { "key": "franchiseeId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Relation",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Priya Kumar\",\n  \"relationType\": \"SPOUSE\",\n  \"consentGiven\": true\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:franchiseeId/relations/:relationId", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":franchiseeId","relations",":relationId"], "variable": [ { "key": "franchiseeId", "value": "1" }, { "key": "relationId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Delete Relation",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:franchiseeId/relations/:relationId", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":franchiseeId","relations",":relationId"], "variable": [ { "key": "franchiseeId", "value": "1" }, { "key": "relationId", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Firms",
+      "item": [
+        {
+          "name": "Create Firm (under Franchisee)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"legalName\": \"Ravi Enterprises\",\n  \"companyType\": \"PROPRIETORSHIP\",\n  \"gstNumber\": \"33ABCDE1234F1Z5\",\n  \"fpCode\": \"FP001\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/franchisees/:franchiseeId/firms", "host": ["{{base_url}}"], "path": ["api","v1","franchisees",":franchiseeId","firms"], "variable": [ { "key": "franchiseeId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Get Firm",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/firms/:id", "host": ["{{base_url}}"], "path": ["api","v1","firms",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Firm",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"legalName\": \"Ravi Enterprises Pvt Ltd\",\n  \"companyType\": \"PRIVATE_LIMITED\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/firms/:id", "host": ["{{base_url}}"], "path": ["api","v1","firms",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Add Owner",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"franchiseeId\": 2,\n  \"isPrimary\": false,\n  \"reason\": \"Adding co-owner\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/firms/:id/owners", "host": ["{{base_url}}"], "path": ["api","v1","firms",":id","owners"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Remove Owner",
+          "request": {
+            "method": "DELETE",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Owner exited\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/firms/:id/owners/:franchiseeId", "host": ["{{base_url}}"], "path": ["api","v1","firms",":id","owners",":franchiseeId"], "variable": [ { "key": "id", "value": "1" }, { "key": "franchiseeId", "value": "2" } ] }
+          }
+        },
+        {
+          "name": "Make Owner Primary",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Ownership restructuring\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/firms/:id/owners/:franchiseeId/make-primary", "host": ["{{base_url}}"], "path": ["api","v1","firms",":id","owners",":franchiseeId","make-primary"], "variable": [ { "key": "id", "value": "1" }, { "key": "franchiseeId", "value": "2" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Salons",
+      "item": [
+        {
+          "name": "Create Salon (under Firm)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"salonCode\": \"SAL001\",\n  \"legacyCode\": \"OLD001\",\n  \"salonName\": \"Naturals Anna Nagar\",\n  \"salonFormat\": \"UNISEX\",\n  \"squareFootage\": 1200,\n  \"launchDate\": \"2024-01-15\",\n  \"address\": \"12 Anna Nagar\",\n  \"district\": \"Chennai\",\n  \"state\": \"Tamil Nadu\",\n  \"pincode\": \"600040\",\n  \"region\": \"South\",\n  \"contactNumber1\": \"9876543210\",\n  \"contactNumber2\": \"9876543211\",\n  \"email\": \"salon@example.com\",\n  \"ratecard\": \"STANDARD\",\n  \"latitude\": 13.0850,\n  \"longitude\": 80.2101,\n  \"operationalStatus\": \"ACTIVE\",\n  \"clusterHeadId\": 1,\n  \"regionalHeadId\": 2,\n  \"stateHeadId\": 3\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/firms/:firmId/salons", "host": ["{{base_url}}"], "path": ["api","v1","firms",":firmId","salons"], "variable": [ { "key": "firmId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Get Salon",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/salons/:id", "host": ["{{base_url}}"], "path": ["api","v1","salons",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Salon",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"salonName\": \"Naturals Anna Nagar Updated\",\n  \"operationalStatus\": \"UNDER_RENOVATION\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/salons/:id", "host": ["{{base_url}}"], "path": ["api","v1","salons",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Transfer Salon to Another Firm",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"companyId\": 2,\n  \"reason\": \"Business restructuring\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/salons/:id/transfer-firm", "host": ["{{base_url}}"], "path": ["api","v1","salons",":id","transfer-firm"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Agreements",
+      "item": [
+        {
+          "name": "Create Agreement (under Salon)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"validFrom\": \"2024-01-01\",\n  \"validTill\": \"2026-12-31\",\n  \"contractYear\": 1,\n  \"renewalYear\": 3,\n  \"royaltyTerms\": \"5% of monthly revenue\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/salons/:salonId/agreements", "host": ["{{base_url}}"], "path": ["api","v1","salons",":salonId","agreements"], "variable": [ { "key": "salonId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "List Agreements for Salon",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/salons/:salonId/agreements", "host": ["{{base_url}}"], "path": ["api","v1","salons",":salonId","agreements"], "variable": [ { "key": "salonId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Get Agreement",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/agreements/:id", "host": ["{{base_url}}"], "path": ["api","v1","agreements",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Agreement",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"royaltyTerms\": \"6% of monthly revenue\",\n  \"contractYear\": 2\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/agreements/:id", "host": ["{{base_url}}"], "path": ["api","v1","agreements",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Renew Agreement",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"validFrom\": \"2027-01-01\",\n  \"validTill\": \"2029-12-31\",\n  \"contractYear\": 1,\n  \"renewalYear\": 4,\n  \"royaltyTerms\": \"5% of monthly revenue\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/agreements/:id/renew", "host": ["{{base_url}}"], "path": ["api","v1","agreements",":id","renew"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Terminate Agreement",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Mutual termination\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/agreements/:id/terminate", "host": ["{{base_url}}"], "path": ["api","v1","agreements",":id","terminate"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "item": [
+        {
+          "name": "Upload Document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "entityType", "value": "FRANCHISEE", "type": "text" },
+                { "key": "entityId", "value": "1", "type": "text" },
+                { "key": "documentType", "value": "PAN_CARD", "type": "text" },
+                { "key": "file", "type": "file", "src": "" }
+              ]
+            },
+            "url": { "raw": "{{base_url}}/api/v1/documents", "host": ["{{base_url}}"], "path": ["api","v1","documents"] }
+          }
+        },
+        {
+          "name": "List Documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/documents?entityType=FRANCHISEE&entityId=1", "host": ["{{base_url}}"], "path": ["api","v1","documents"], "query": [ { "key": "entityType", "value": "FRANCHISEE" }, { "key": "entityId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Delete Document",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/documents/:id", "host": ["{{base_url}}"], "path": ["api","v1","documents",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Franchisees",
+      "item": [
+        {
+          "name": "Create Franchisee (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"prefix\": \"Mr.\",\n  \"fullName\": \"Ravi Kumar\",\n  \"franchiseeType\": \"INDIVIDUAL\",\n  \"contact\": \"9876543210\",\n  \"dateOfBirth\": \"1990-05-15\",\n  \"email\": \"ravi.kumar@example.com\",\n  \"pan\": \"ABCDE1234F\",\n  \"aadhaar\": \"123456789012\",\n  \"address\": \"123 Main St, Chennai\",\n  \"userId\": null\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/franchisees", "host": ["{{base_url}}"], "path": ["api","v1","admin","franchisees"] }
+          }
+        },
+        {
+          "name": "Update Franchisee (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Ravi Kumar\",\n  \"overallStatus\": \"ONBOARDED\",\n  \"userId\": 5\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/franchisees/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","franchisees",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "List/Search Franchisees (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/franchisees?status=SUBMITTED&source=SELF_SERVICE&search=Ravi&sortBy=fullName&direction=ASC&page=0&size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","franchisees"],
+              "query": [
+                { "key": "status", "value": "SUBMITTED" },
+                { "key": "source", "value": "SELF_SERVICE" },
+                { "key": "search", "value": "Ravi" },
+                { "key": "sortBy", "value": "fullName" },
+                { "key": "direction", "value": "ASC" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Verify Franchisee Section",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/franchisees/:id/sections/:section/verify", "host": ["{{base_url}}"], "path": ["api","v1","admin","franchisees",":id","sections",":section","verify"], "variable": [ { "key": "id", "value": "1" }, { "key": "section", "value": "FRANCHISEE_INFO" } ] }
+          }
+        },
+        {
+          "name": "Reject Franchisee Section",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"PAN document illegible\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/franchisees/:id/sections/:section/reject", "host": ["{{base_url}}"], "path": ["api","v1","admin","franchisees",":id","sections",":section","reject"], "variable": [ { "key": "id", "value": "1" }, { "key": "section", "value": "FRANCHISEE_INFO" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Firms",
+      "item": [
+        {
+          "name": "Create Firm (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"legalName\": \"Ravi Enterprises\",\n  \"companyType\": \"PROPRIETORSHIP\",\n  \"gstNumber\": \"33ABCDE1234F1Z5\",\n  \"fpCode\": \"FP001\",\n  \"owners\": [\n    { \"franchiseeId\": 1, \"isPrimary\": true }\n  ]\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/firms", "host": ["{{base_url}}"], "path": ["api","v1","admin","firms"] }
+          }
+        },
+        {
+          "name": "Update Firm (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"legalName\": \"Ravi Enterprises Pvt Ltd\",\n  \"companyType\": \"PRIVATE_LIMITED\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/firms/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","firms",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "List Firms (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/firms?companyType=PRIVATE_LIMITED&search=Ravi&page=0&size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","firms"],
+              "query": [
+                { "key": "companyType", "value": "PRIVATE_LIMITED" },
+                { "key": "search", "value": "Ravi" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Salons",
+      "item": [
+        {
+          "name": "Create Salon (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"firmId\": 1,\n  \"salonCode\": \"SAL001\",\n  \"legacyCode\": \"OLD001\",\n  \"salonName\": \"Naturals Anna Nagar\",\n  \"salonFormat\": \"UNISEX\",\n  \"squareFootage\": 1200,\n  \"launchDate\": \"2024-01-15\",\n  \"address\": \"12 Anna Nagar\",\n  \"district\": \"Chennai\",\n  \"state\": \"Tamil Nadu\",\n  \"pincode\": \"600040\",\n  \"region\": \"South\",\n  \"contactNumber1\": \"9876543210\",\n  \"contactNumber2\": \"9876543211\",\n  \"email\": \"salon@example.com\",\n  \"ratecard\": \"STANDARD\",\n  \"latitude\": 13.0850,\n  \"longitude\": 80.2101,\n  \"operationalStatus\": \"ACTIVE\",\n  \"clusterHeadId\": 1,\n  \"regionalHeadId\": 2,\n  \"stateHeadId\": 3\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/salons", "host": ["{{base_url}}"], "path": ["api","v1","admin","salons"] }
+          }
+        },
+        {
+          "name": "Update Salon (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"salonName\": \"Naturals Anna Nagar Updated\",\n  \"operationalStatus\": \"ACTIVE\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/salons/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","salons",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Transfer Salon to Another Firm (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"companyId\": 2,\n  \"reason\": \"Business restructuring\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/salons/:id/transfer-firm", "host": ["{{base_url}}"], "path": ["api","v1","admin","salons",":id","transfer-firm"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "List Salons (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/salons?operationalStatus=ACTIVE&region=South&state=Tamil%20Nadu&page=0&size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","salons"],
+              "query": [
+                { "key": "operationalStatus", "value": "ACTIVE" },
+                { "key": "region", "value": "South" },
+                { "key": "state", "value": "Tamil Nadu" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Agreements",
+      "item": [
+        {
+          "name": "Create Agreement (Admin, under Salon)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"validFrom\": \"2024-01-01\",\n  \"validTill\": \"2026-12-31\",\n  \"contractYear\": 1,\n  \"renewalYear\": 3,\n  \"royaltyTerms\": \"5% of monthly revenue\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/salons/:salonId/agreements", "host": ["{{base_url}}"], "path": ["api","v1","admin","salons",":salonId","agreements"], "variable": [ { "key": "salonId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "List Agreements for Salon (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/salons/:salonId/agreements", "host": ["{{base_url}}"], "path": ["api","v1","admin","salons",":salonId","agreements"], "variable": [ { "key": "salonId", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Get Agreement (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/agreements/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","agreements",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Agreement (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"royaltyTerms\": \"6% of monthly revenue\",\n  \"contractYear\": 2\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/agreements/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","agreements",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Renew Agreement (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"validFrom\": \"2027-01-01\",\n  \"validTill\": \"2029-12-31\",\n  \"contractYear\": 1,\n  \"renewalYear\": 4,\n  \"royaltyTerms\": \"5% of monthly revenue\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/agreements/:id/renew", "host": ["{{base_url}}"], "path": ["api","v1","admin","agreements",":id","renew"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Terminate Agreement (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Mutual termination\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/agreements/:id/terminate", "host": ["{{base_url}}"], "path": ["api","v1","admin","agreements",":id","terminate"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Officials",
+      "item": [
+        {
+          "name": "Create Official",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"officialType\": \"CLUSTER_MANAGER\",\n  \"name\": \"Anand Raj\",\n  \"contact\": \"9876543212\",\n  \"email\": \"anand.raj@example.com\",\n  \"region\": \"South\",\n  \"userId\": null\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/officials", "host": ["{{base_url}}"], "path": ["api","v1","admin","officials"] }
+          }
+        },
+        {
+          "name": "List Officials",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/admin/officials?officialType=CLUSTER_MANAGER&region=South&page=0&size=20",
+              "host": ["{{base_url}}"],
+              "path": ["api","v1","admin","officials"],
+              "query": [
+                { "key": "officialType", "value": "CLUSTER_MANAGER" },
+                { "key": "region", "value": "South" },
+                { "key": "page", "value": "0" },
+                { "key": "size", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Official",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/officials/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","officials",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Update Official",
+          "request": {
+            "method": "PATCH",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Anand Raj Updated\",\n  \"region\": \"West\"\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/officials/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","officials",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Link User to Official",
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": 5\n}" },
+            "url": { "raw": "{{base_url}}/api/v1/admin/officials/:id/link-user", "host": ["{{base_url}}"], "path": ["api","v1","admin","officials",":id","link-user"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        },
+        {
+          "name": "Delete Official",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/officials/:id", "host": ["{{base_url}}"], "path": ["api","v1","admin","officials",":id"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Documents",
+      "item": [
+        {
+          "name": "Verify Document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/documents/:id/verify", "host": ["{{base_url}}"], "path": ["api","v1","admin","documents",":id","verify"], "variable": [ { "key": "id", "value": "1" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Important Dates",
+      "item": [
+        {
+          "name": "Upcoming Important Dates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/important-dates/upcoming?withinDays=30", "host": ["{{base_url}}"], "path": ["api","v1","admin","important-dates","upcoming"], "query": [ { "key": "withinDays", "value": "30" } ] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/admin/dashboard", "host": ["{{base_url}}"], "path": ["api","v1","admin","dashboard"] }
+          }
+        }
+      ]
+    }
+  ]
+}

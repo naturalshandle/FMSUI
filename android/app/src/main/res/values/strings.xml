@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Naturals FMS</string>
+    <string name="title_activity_main">Naturals FMS</string>
+    <string name="package_name">com.naturals.fms</string>
+    <string name="custom_url_scheme">com.naturals.fms</string>
+</resources>
