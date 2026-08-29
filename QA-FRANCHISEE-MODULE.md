@@ -1,15 +1,20 @@
 # QA — Franchisee Module
 
+> **Response shapes not verified live.** This pass integrated against
+> `docs/FMSBE_postman_collection.json`, which is the confirmed source of truth for
+> every request URL/method/body below. It does **not** document response shapes —
+> those were implemented defensively (multiple fallback field names, graceful `—`
+> display) rather than guessed at as exact. Run each journey below against a live
+> backend and fix any adapter in `src/lib/*Api.ts` whose fallback guess turns out
+> wrong (search for the endpoint's name in that file — each has a comment noting
+> what's confirmed vs. assumed).
+
 ## Add Franchisee wizard (`/admin/franchisees/new`)
 
-> **Backend contract not verified.** No backend repository was available in this
-> environment, so the endpoints below (`POST /admin/franchisees`, `POST /admin/firms`,
-> `POST /admin/firms/{firmId}/salons`, `GET /admin/franchisees/{id}/completion`,
-> `POST /documents`) and their request/response field names are best guesses taken
-> from the feature prompt, not confirmed DTOs. Reconcile against real backend source
-> before treating this journey as verified end-to-end. Also note: no `FileUpload`
-/ `POST /documents` pattern existed anywhere in this codebase prior to this change —
-> a new `FileUpload` component was built for it.
+Endpoints: `POST /admin/franchisees`, `POST /admin/firms`, `POST /admin/salons`,
+`GET /admin/franchisees/{id}/completion`, `POST /documents`. Request shapes are
+confirmed against the Postman collection; response shapes fall back to the
+submitted input for any field the response omits.
 
 ### Journey 1 — Single owner, single business, single salon (happy path)
 
@@ -108,3 +113,100 @@
 - The Directory/search screen does not exist yet; the only way back to a record
   created via this wizard is the **View Franchisee Record** link on the Finish
   screen, or navigating there directly by URL.
+
+---
+
+## Officials CRUD (`/officials`)
+
+Endpoints: `GET/POST /admin/officials`, `GET/PATCH/DELETE /admin/officials/{id}`,
+`POST /admin/officials/{id}/link-user`.
+
+1. Open **Officials** from the sidebar. Confirm the table loads (empty state if none
+   exist yet) with columns Name, Type, Region, Contact, Linked User.
+2. Click **Add Official**, fill Type (Cluster Manager / Regional Manager / State
+   Head), Name, Contact; leave Email/Region blank. Save.
+   - Expect: success toast, new row appears, "Linked User" shows "Not linked".
+3. Click **Link User** on that row, enter a numeric User ID, confirm.
+   - Expect: success toast, row now shows "Linked (User #N)" and the Link User
+     action disappears (link is one-directional per the API — no unlink endpoint).
+4. Click the edit (pencil) icon, change Region, save.
+   - Expect: success toast, row reflects the new region.
+5. Filter by Type and by Region (text field) — confirm the list narrows to matches
+   for each filter independently and in combination.
+6. **Delete-blocked case**: attempt to delete an official currently referenced by a
+   salon's Cluster/Regional/State Head field (see Salon Officials assignment below).
+   - Expect: a 409 is caught and the modal shows the specific salon count blocking
+     deletion (e.g. "assigned to 2 salons"), not a generic failure message. The
+     Delete button stays disabled until you close and retry after reassigning.
+7. Delete an official with no salon assignments.
+   - Expect: success toast, row removed from the table.
+
+## Multi-owner Firm (Company) management (`/firms`, `/firm/:id`)
+
+Endpoints: `GET /admin/firms`, `GET/PATCH /firms/{id}`, `POST /admin/firms` (create,
+with `owners[]`), `POST /firms/{id}/owners`, `DELETE /firms/{id}/owners/{franchiseeId}`,
+`POST /firms/{id}/owners/{franchiseeId}/make-primary`.
+
+1. Open **Companies** from the sidebar — confirm the directory loads all firms with
+   Legal Name, Type, GST, Primary Owner, Owner count, Salon count columns, and that
+   search + company-type filter both narrow the list.
+2. Open a firm's detail page. Confirm the **Owners** card lists every owner with
+   exactly one showing the "Primary" star badge.
+3. Click **Add Owner**, pick a franchisee not already an owner, optionally check
+   "Make this the primary owner", give a reason, confirm.
+   - Expect: success toast, new owner appears in the list; if marked primary, the
+     star badge moves to them and the previous primary loses it.
+4. Click **Make Primary** on a non-primary owner, give a reason, confirm.
+   - Expect: success toast, the star badge moves to that owner.
+5. Click **Remove** on a non-primary owner, give a reason, confirm.
+   - Expect: success toast, owner disappears from the list.
+6. **Blocked-removal case**: attempt to remove the current primary owner while at
+   least one other owner remains.
+   - Expect: the request's 409 is caught and a specific message is shown — "make
+     another owner Primary first, then remove this one" — not a generic error.
+7. In the **Add Franchisee** wizard's Business step, select two or more owners and
+   confirm the Primary radio only allows one selection at a time, and that the
+   created firm's `owners` array in the request carries `isPrimary: true` for
+   exactly the one selected (verify via network inspector against
+   `POST /admin/firms`).
+
+## Salon Officials assignment (`/salon/:id`, Add Franchisee wizard Step 3)
+
+Endpoints: salons carry `clusterHeadId`/`regionalHeadId`/`stateHeadId` referencing
+`GET /admin/officials`.
+
+1. In the Add Franchisee wizard's Salon step, confirm Cluster Head / Regional Head /
+   State Head are searchable dropdowns sourced from the Officials directory, each
+   filtered to the matching `officialType` (a Regional Manager cannot be picked as
+   Cluster Head).
+2. Save a salon with all three assigned. Open the resulting Salon Detail page and
+   confirm the "Officials Assigned" card resolves each id to the official's name
+   (not just the raw id).
+3. With no officials created yet, confirm the dropdowns show as empty (not broken)
+   and the salon can still be saved with those fields blank.
+
+## Agreement lifecycle (`/salon/:id`)
+
+Endpoints: `POST/GET /admin/salons/{salonId}/agreements`, `PATCH /admin/agreements/{id}`,
+`POST /admin/agreements/{id}/renew`, `POST /admin/agreements/{id}/terminate`.
+
+1. Open a salon with no agreement yet — confirm the placeholder is gone and instead
+   an empty state with a **Create Agreement** button is shown.
+2. Create an agreement with Valid From, Valid Till, Contract Year, Renewal Year,
+   Royalty Terms.
+   - Expect: success toast, the agreement now shows as "Current Agreement" with all
+     fields displayed and a status badge.
+3. Click **Edit** — confirm Valid Till is shown read-only (or absent) since the
+   backend's update DTO intentionally excludes it; edit Contract Year/Royalty Terms
+   and save.
+   - Expect: success toast, current agreement reflects the change; Valid Till
+     unchanged.
+4. Click **Renew** (not Edit) with a new Valid From/Valid Till range.
+   - Expect: success toast noting the previous agreement is now superseded; the new
+     record becomes "Current Agreement"; the old one appears collapsed under
+     "Agreement History" with a non-ACTIVE status badge.
+5. Expand **Agreement History** — confirm every superseded agreement is listed with
+   its date range, collapsed by default.
+6. Click **Terminate** on the current agreement, provide a reason, confirm.
+   - Expect: info toast, agreement status updates to reflect termination.
+7. Confirm no action lets you change Valid Till without going through Renew.
