@@ -9,16 +9,18 @@ import {
   UserPlus,
   LogOut,
   Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 
 const navItems = [
   { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
-  { to: '/review', label: 'Review Queue', icon: ClipboardCheck },
+  { to: '/review', label: 'Directory', icon: ClipboardCheck },
   { to: '/admin/franchisees/new', label: 'Add Franchisee', icon: UserPlus },
-  { to: '/firms', label: 'Firm Management', icon: Building2 },
+  { to: '/firms', label: 'Companies', icon: Building2 },
   { to: '/salons', label: 'Salon Management', icon: Scissors },
+  { to: '/officials', label: 'Officials', icon: ShieldCheck },
   { to: '/admin-users', label: 'Admin Users', icon: Users },
 ];
 

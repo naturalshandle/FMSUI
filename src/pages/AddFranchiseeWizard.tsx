@@ -12,7 +12,6 @@ import {
   Plus,
   PartyPopper,
 } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
@@ -97,7 +96,6 @@ const emptyAgreementForm = {
 export function AddFranchiseeWizard() {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { refreshFranchisees } = useApp();
 
   const [step, setStep] = useState<Step>(1);
   const [finished, setFinished] = useState(false);
@@ -366,8 +364,7 @@ export function AddFranchiseeWizard() {
   // Finish
   // ---------------------------------------------------------------------
 
-  const handleFinish = async () => {
-    await refreshFranchisees();
+  const handleFinish = () => {
     setFinished(true);
   };
 

@@ -15,6 +15,7 @@ import { FirmManagement } from '@/pages/FirmManagement';
 import { SalonManagement } from '@/pages/SalonManagement';
 import { AdminUserManagement } from '@/pages/AdminUserManagement';
 import { AddFranchiseeWizard } from '@/pages/AddFranchiseeWizard';
+import { OfficialsManagement } from '@/pages/OfficialsManagement';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { currentUser } = useApp();
@@ -45,6 +46,7 @@ function AppRoutes() {
       <Route path="/salons" element={<RequireAuth><SalonManagement /></RequireAuth>} />
       <Route path="/salon/:id" element={<RequireAuth><SalonDetail /></RequireAuth>} />
       <Route path="/admin-users" element={<RequireAuth><AdminUserManagement /></RequireAuth>} />
+      <Route path="/officials" element={<RequireAuth><OfficialsManagement /></RequireAuth>} />
       <Route path="/admin/franchisees/new" element={<RequireAuth><AddFranchiseeWizard /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

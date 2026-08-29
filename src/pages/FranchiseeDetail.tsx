@@ -10,8 +10,6 @@ import {
   User as UserIcon,
   ChevronRight,
   Calendar,
-  Mail,
-  Phone,
   BadgeCheck,
 } from 'lucide-react';
 import { getFranchisee, verifySection as apiVerifySection, rejectSection as apiRejectSection, ApiError } from '@/lib/api';
@@ -25,7 +23,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { sectionLabels } from '@/utils/stats';
-import type { Franchisee, SectionName, SectionState } from '@/types';
+import type { Franchisee, SectionName } from '@/types';
 
 type Tab = SectionName;
 
@@ -400,6 +398,7 @@ export function FranchiseeDetail() {
         title={`Verify ${verifyModal ? sectionLabels[verifyModal.section] : ''} section?`}
         description="Confirm that you've reviewed all information in this section and it meets the requirements."
         primaryLabel="Confirm Verification"
+        primaryDisabled={busy}
         onPrimary={() => verifyModal && handleVerify(verifyModal.section)}
       >
         <div className="flex items-start gap-3 rounded-xl bg-brand-50 px-4 py-3">
@@ -425,7 +424,7 @@ export function FranchiseeDetail() {
         }
         primaryLabel="Confirm Rejection"
         primaryVariant="danger"
-        primaryDisabled={!rejectReason.trim()}
+        primaryDisabled={!rejectReason.trim() || busy}
         onPrimary={handleRejectConfirm}
       >
         <Textarea

@@ -1,49 +1,48 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Scissors, ChevronRight, Search } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
+import { Badge } from '@/components/ui/Badge';
+import { Input, Select } from '@/components/ui/Input';
 import { SkeletonTable } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
-import type { Salon, Firm, Franchisee } from '@/types';
-
-interface SalonRow extends Salon {
-  firmLegalName: string;
-  firmId: string;
-  ownerName: string;
-}
+import { listSalonsAdmin } from '@/lib/salonsApi';
+import { ApiError } from '@/lib/api';
+import type { Salon } from '@/types';
 
 export function SalonManagement() {
-  const { franchisees, franchiseesLoading: loading } = useApp();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [region, setRegion] = useState('');
+  const [salons, setSalons] = useState<Salon[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const data: SalonRow[] = useMemo(
-    () =>
-      franchisees.flatMap((f: Franchisee) =>
-        f.firms.flatMap((firm: Firm) =>
-          firm.salons.map((sal: Salon) => ({
-            ...sal,
-            firmLegalName: firm.legalName,
-            firmId: firm.id,
-            ownerName: `Franchisee #${f.id}`,
-          })),
-        ),
-      ),
-    [franchisees],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listSalonsAdmin({ operationalStatus: status || undefined, region: region || undefined, size: 100 })
+      .then((page) => {
+        if (!cancelled) setSalons(page.content);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Failed to load salons.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, region]);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return data;
+  const filtered = salons.filter((s) => {
+    if (!search.trim()) return true;
     const q = search.toLowerCase();
-    return data.filter(
-      (s) =>
-        s.salonName.toLowerCase().includes(q) ||
-        s.address.toLowerCase().includes(q) ||
-        s.firmLegalName.toLowerCase().includes(q),
-    );
-  }, [data, search]);
+    return s.salonName.toLowerCase().includes(q) || (s.address ?? '').toLowerCase().includes(q);
+  });
 
   return (
     <div className="space-y-6">
@@ -54,19 +53,26 @@ export function SalonManagement() {
         </p>
       </div>
 
-      <div className="relative w-full sm:w-72">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-secondary/50" />
-        <Input
-          placeholder="Search by name, address, firm..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-secondary/50" />
+          <Input placeholder="Search by name, address..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+        </div>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full sm:w-48">
+          <option value="">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+          <option value="UNDER_RENOVATION">Under Renovation</option>
+          <option value="CLOSED">Closed</option>
+        </Select>
+        <Input placeholder="Region" value={region} onChange={(e) => setRegion(e.target.value)} className="w-full sm:w-40" />
       </div>
 
       <Card className="overflow-hidden">
-        {loading || !data ? (
+        {loading ? (
           <SkeletonTable rows={6} />
+        ) : error ? (
+          <EmptyState title="Couldn't load salons" message={error} icon={<Scissors className="h-8 w-8" />} />
         ) : filtered.length === 0 ? (
           <EmptyState
             title="No salons found"
@@ -83,10 +89,10 @@ export function SalonManagement() {
                       Salon
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      City
+                      Region / State
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Firm
+                      Status
                     </th>
                     <th className="px-3 py-3" />
                   </tr>
@@ -108,8 +114,16 @@ export function SalonManagement() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-3 py-4 text-sm text-ink-secondary">{sal.city || '—'}</td>
-                      <td className="px-3 py-4 text-sm text-ink">{sal.firmLegalName}</td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">
+                        {[sal.region, sal.state].filter(Boolean).join(' / ') || '—'}
+                      </td>
+                      <td className="px-3 py-4">
+                        {sal.operationalStatus ? (
+                          <Badge kind="DRAFT" label={sal.operationalStatus} />
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="px-3 py-4">
                         <ChevronRight className="h-4 w-4 text-ink-secondary/30 group-hover:text-brand-600 transition-colors" />
                       </td>
@@ -132,13 +146,13 @@ export function SalonManagement() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-ink truncate">{sal.salonName}</p>
-                      <p className="text-xs text-ink-secondary truncate">{sal.city || '—'} · {sal.firmLegalName}</p>
+                      <p className="text-xs text-ink-secondary truncate">
+                        {[sal.region, sal.state].filter(Boolean).join(' / ') || '—'}
+                      </p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-ink-secondary/30" />
                   </div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-ink-secondary truncate flex-1 pr-2">{sal.address || '—'}</p>
-                  </div>
+                  <p className="text-xs text-ink-secondary truncate">{sal.address || '—'}</p>
                 </div>
               ))}
             </div>
