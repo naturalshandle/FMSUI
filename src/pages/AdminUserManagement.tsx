@@ -59,8 +59,8 @@ export function AdminUserManagement() {
       await createAdminUser({
         fullName: form.fullName.trim(),
         email: form.email.trim(),
-        phoneNumber: form.phone.trim(),
-        role: form.role,
+        phone: form.phone.trim(),
+        roleName: form.role,
       });
       showToast('success', `Admin user ${form.fullName} created successfully.`);
       setCreateModal(false);

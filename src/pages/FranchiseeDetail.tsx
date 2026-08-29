@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -14,7 +14,7 @@ import {
   Phone,
   BadgeCheck,
 } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { getFranchisee, verifySection as apiVerifySection, rejectSection as apiRejectSection, ApiError } from '@/lib/api';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
@@ -47,6 +47,7 @@ const relationTypeLabels: Record<string, string> = {
 
 const firmTypeLabels: Record<string, string> = {
   PROPRIETORSHIP: 'Proprietorship',
+  PARTNERSHIP: 'Partnership',
   PRIVATE_LIMITED: 'Private Limited',
   LLP: 'LLP',
 };
@@ -63,10 +64,25 @@ function formatDate(iso?: string): string {
 export function FranchiseeDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { franchisees, franchiseesLoading, verifySection, rejectSection } = useApp();
   const { showToast } = useToast();
-  const loading = franchiseesLoading;
-  const franchisee = useMemo(() => franchisees.find((f) => f.id === id) ?? null, [franchisees, id]);
+  const [franchisee, setFranchisee] = useState<Franchisee | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    if (!id) return;
+    setLoading(true);
+    setLoadError(null);
+    getFranchisee(id)
+      .then(setFranchisee)
+      .catch((err) => setLoadError(err instanceof ApiError ? err.message : 'Failed to load franchisee.'))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
   const [activeTab, setActiveTab] = useState<Tab>('FRANCHISEE_INFO');
   const [rejectModal, setRejectModal] = useState<{ section: SectionName; isReReject: boolean } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -89,9 +105,10 @@ export function FranchiseeDetail() {
     if (!franchisee) return;
     setBusy(true);
     try {
-      await verifySection(franchisee.id, section);
+      await apiVerifySection(franchisee.id, section);
       setVerifyModal(null);
       showToast('success', `${sectionLabels[section]} section verified successfully.`);
+      load();
     } catch (err) {
       showToast('error', err instanceof Error ? err.message : 'Failed to verify section.');
     } finally {
@@ -103,10 +120,11 @@ export function FranchiseeDetail() {
     if (!rejectModal || !rejectReason.trim() || !franchisee) return;
     setBusy(true);
     try {
-      await rejectSection(franchisee.id, rejectModal.section, rejectReason);
+      await apiRejectSection(franchisee.id, rejectModal.section, rejectReason);
       showToast('info', `${sectionLabels[rejectModal.section]} section rejected. The franchisee will be notified.`);
       setRejectModal(null);
       setRejectReason('');
+      load();
     } catch (err) {
       showToast('error', err instanceof Error ? err.message : 'Failed to reject section.');
     } finally {
@@ -114,7 +132,7 @@ export function FranchiseeDetail() {
     }
   };
 
-  if (loading || !franchisee) {
+  if (loading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
@@ -140,15 +158,16 @@ export function FranchiseeDetail() {
     );
   }
 
-  if (!franchisee) {
+  if (loadError || !franchisee) {
     return (
       <EmptyState
         title="Franchisee not found"
-        message="This franchisee record may have been removed."
-        action={<Button onClick={() => navigate('/review')}>Back to Review Queue</Button>}
+        message={loadError ?? 'This franchisee record may have been removed.'}
+        action={<Button onClick={() => navigate('/review')}>Back to Directory</Button>}
       />
     );
   }
+
 
   return (
     <div className="space-y-6">
@@ -330,7 +349,7 @@ export function FranchiseeDetail() {
                         {firm.legalName}
                       </p>
                       <p className="text-xs text-ink-secondary mt-0.5">
-                        {firmTypeLabels[firm.firmType]} · GST: {firm.gstNumber} · {firm.salons.length} salon(s)
+                        {firmTypeLabels[firm.companyType]} · GST: {firm.gstNumber} · {firm.salons.length} salon(s)
                       </p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-ink-secondary/30 group-hover:text-brand-600 transition-colors" />

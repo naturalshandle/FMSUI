@@ -1,5 +1,5 @@
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useState } from 'react';
-import type { AdminUser, CurrentUser, Franchisee, SectionName } from '@/types';
+import { type ReactNode, createContext, useCallback, useContext, useState } from 'react';
+import type { AdminUser, CurrentUser } from '@/types';
 import * as api from '@/lib/api';
 import { decodeJwt } from '@/lib/jwt';
 
@@ -22,22 +22,12 @@ interface AppState {
   pendingMfa: PendingMfa | null;
   cancelMfa: () => void;
   fetchMfaSetupInfo: (bearerToken?: string) => Promise<api.MfaSetupInfo>;
-  completeMfaSetup: (secret: string, totp: string, bearerToken?: string) => Promise<api.EnableMfaResult>;
-  verifyMfaLogin: (totp: string) => Promise<void>;
+  completeMfaSetup: (secret: string, code: string, bearerToken?: string) => Promise<api.EnableMfaResult>;
+  verifyMfaLogin: (code: string) => Promise<void>;
 
-  // Data
-  franchisees: Franchisee[];
-  franchiseesLoading: boolean;
-  franchiseesError: string | null;
-  refreshFranchisees: () => Promise<void>;
+  // Admin users (session-scoped — backend has no list endpoint yet)
   adminUsers: AdminUser[];
-
-  // Mutations
-  verifySection: (franchiseeId: string, section: SectionName) => Promise<void>;
-  rejectSection: (franchiseeId: string, section: SectionName, reason: string) => Promise<void>;
-  transferFirmOwnership: (firmId: string, toFranchiseeId: string, reason: string) => Promise<void>;
-  transferSalonFirm: (salonId: string, toFirmId: string, reason: string) => Promise<void>;
-  createAdminUser: (user: { fullName: string; email: string; phoneNumber?: string; role: string }) => Promise<void>;
+  createAdminUser: (user: { fullName: string; email: string; phone?: string; roleName: string }) => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -66,32 +56,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authLoading, setAuthLoading] = useState(false);
   const [pendingMfa, setPendingMfa] = useState<PendingMfa | null>(null);
 
-  const [franchisees, setFranchisees] = useState<Franchisee[]>([]);
-  const [franchiseesLoading, setFranchiseesLoading] = useState(false);
-  const [franchiseesError, setFranchiseesError] = useState<string | null>(null);
-
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
-
-  const refreshFranchisees = useCallback(async () => {
-    setFranchiseesLoading(true);
-    setFranchiseesError(null);
-    try {
-      const data = await api.listFranchisees({ size: 200 });
-      setFranchisees(data);
-    } catch (err) {
-      setFranchiseesError(err instanceof api.ApiError ? err.message : 'Failed to load franchisees.');
-    } finally {
-      setFranchiseesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (currentUser) {
-      refreshFranchisees();
-    } else {
-      setFranchisees([]);
-    }
-  }, [currentUser, refreshFranchisees]);
 
   const login = useCallback(async (email: string, password: string): Promise<LoginOutcome> => {
     setAuthError(null);
@@ -139,10 +104,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const completeMfaSetup = useCallback(
-    async (secret: string, totp: string, bearerToken?: string) => {
+    async (secret: string, code: string, bearerToken?: string) => {
       const token = bearerToken ?? pendingMfa?.token;
       if (!token) throw new api.ApiError(0, 'No MFA session in progress.');
-      const result = await api.enableMfa(token, secret, totp);
+      const result = await api.enableMfa(token, secret, code);
       if (result.status === 'TOKENS') {
         api.setTokens(result.tokens.accessToken, result.tokens.refreshToken);
         setCurrentUser(userFromStoredToken());
@@ -157,9 +122,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const verifyMfaLogin = useCallback(
-    async (totp: string) => {
+    async (code: string) => {
       if (!pendingMfa) throw new api.ApiError(0, 'No MFA session in progress.');
-      const tokens = await api.verifyMfa(pendingMfa.token, totp);
+      const tokens = await api.verifyMfa(pendingMfa.token, code);
       api.setTokens(tokens.accessToken, tokens.refreshToken);
       setCurrentUser(userFromStoredToken());
       setPendingMfa(null);
@@ -167,42 +132,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [pendingMfa],
   );
 
-  const verifySection = useCallback(async (franchiseeId: string, section: SectionName) => {
-    await api.verifySection(franchiseeId, section);
-    const updated = await api.getFranchisee(franchiseeId);
-    setFranchisees((prev) => prev.map((f) => (f.id === franchiseeId ? updated : f)));
-  }, []);
-
-  const rejectSection = useCallback(async (franchiseeId: string, section: SectionName, reason: string) => {
-    await api.rejectSection(franchiseeId, section, reason);
-    const updated = await api.getFranchisee(franchiseeId);
-    setFranchisees((prev) => prev.map((f) => (f.id === franchiseeId ? updated : f)));
-  }, []);
-
-  const transferFirmOwnership = useCallback(
-    async (firmId: string, toFranchiseeId: string, reason: string) => {
-      await api.transferFirmOwnership(firmId, toFranchiseeId, reason);
-      await refreshFranchisees();
-    },
-    [refreshFranchisees],
-  );
-
-  const transferSalonFirm = useCallback(
-    async (salonId: string, toFirmId: string, reason: string) => {
-      await api.transferSalonFirm(salonId, toFirmId, reason);
-      await refreshFranchisees();
-    },
-    [refreshFranchisees],
-  );
-
   const createAdminUser = useCallback(
-    async (user: { fullName: string; email: string; phoneNumber?: string; role: string }) => {
-      const created = await api.createAdminUser({
-        fullName: user.fullName,
-        email: user.email,
-        phoneNumber: user.phoneNumber,
-        roleNames: [user.role],
-      });
+    async (user: { fullName: string; email: string; phone?: string; roleName: string }) => {
+      const created = await api.createAdminUser(user);
       setAdminUsers((prev) => [...prev, created]);
     },
     [],
@@ -221,15 +153,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchMfaSetupInfo,
         completeMfaSetup,
         verifyMfaLogin,
-        franchisees,
-        franchiseesLoading,
-        franchiseesError,
-        refreshFranchisees,
         adminUsers,
-        verifySection,
-        rejectSection,
-        transferFirmOwnership,
-        transferSalonFirm,
         createAdminUser,
       }}
     >

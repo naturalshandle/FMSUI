@@ -1,61 +1,88 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, Search, ClipboardCheck } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { ChevronRight, ChevronLeft, Search, ClipboardCheck } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
-import { Input } from '@/components/ui/Input';
+import { Input, Select } from '@/components/ui/Input';
 import { SkeletonTable } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Button } from '@/components/ui/Button';
-import { sectionLabels } from '@/utils/stats';
-import type { Franchisee } from '@/types';
+import { useToast } from '@/components/ui/Toast';
+import { listFranchiseesAdmin, ApiError } from '@/lib/api';
+import type { FranchiseeSummary } from '@/types';
 
-type FilterKey = 'all' | 'pending' | 'verified' | 'rejected';
+type FilterKey = 'all' | 'DRAFT' | 'SUBMITTED' | 'VERIFIED' | 'REJECTED';
 
 const filterConfig: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'verified', label: 'Verified' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'SUBMITTED', label: 'Pending' },
+  { key: 'VERIFIED', label: 'Verified' },
+  { key: 'REJECTED', label: 'Rejected' },
 ];
 
-function hasSectionStatus(f: Franchisee, status: 'SUBMITTED' | 'VERIFIED' | 'REJECTED'): boolean {
-  return f.sections.some((s) => s.status === status);
+function formatDate(iso?: string): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
+const PAGE_SIZE = 20;
 
 export function ReviewQueue() {
-  const { franchisees, franchiseesLoading: loading } = useApp();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialFilter = (searchParams.get('filter') as FilterKey) ?? 'all';
   const [filter, setFilter] = useState<FilterKey>(initialFilter);
+  const [source, setSource] = useState('');
   const [search, setSearch] = useState('');
-  const data = franchisees;
+  const [page, setPage] = useState(0);
 
-  const filtered = useMemo(() => {
-    let result = data;
-    if (filter === 'pending') result = result.filter((f) => hasSectionStatus(f, 'SUBMITTED'));
-    else if (filter === 'verified') result = result.filter((f) => hasSectionStatus(f, 'VERIFIED'));
-    else if (filter === 'rejected') result = result.filter((f) => hasSectionStatus(f, 'REJECTED'));
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter((f) => f.pan.toLowerCase().includes(q) || f.id.includes(q));
-    }
-    return result;
-  }, [data, filter, search]);
+  const [rows, setRows] = useState<FranchiseeSummary[]>([]);
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listFranchiseesAdmin({
+      status: filter === 'all' ? undefined : filter,
+      source: source || undefined,
+      search: search.trim() || undefined,
+      sortBy: 'fullName',
+      direction: 'ASC',
+      page,
+      size: PAGE_SIZE,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setRows(result.content);
+        setTotalElements(result.totalElements);
+        setTotalPages(result.totalPages);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        const message = err instanceof ApiError ? err.message : 'Failed to load franchisees.';
+        setError(message);
+        showToast('error', message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, source, search, page]);
 
   const handleFilterChange = (key: FilterKey) => {
     setFilter(key);
+    setPage(0);
     setSearchParams(key === 'all' ? {} : { filter: key });
   };
 
@@ -63,7 +90,7 @@ export function ReviewQueue() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-ink">Review Queue</h1>
+        <h1 className="text-2xl font-bold text-ink">Franchisee Directory</h1>
         <p className="text-sm text-ink-secondary mt-1">
           Review and verify franchisee onboarding sections
         </p>
@@ -86,14 +113,31 @@ export function ReviewQueue() {
             </button>
           ))}
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-secondary/50" />
-          <Input
-            placeholder="Search by PAN or ID..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
+        <div className="flex gap-3 w-full sm:w-auto">
+          <Select
+            value={source}
+            onChange={(e) => {
+              setSource(e.target.value);
+              setPage(0);
+            }}
+            className="w-40"
+          >
+            <option value="">All sources</option>
+            <option value="SELF_SERVICE">Self-service</option>
+            <option value="ADMIN">Admin-entered</option>
+          </Select>
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-secondary/50" />
+            <Input
+              placeholder="Search by name or PAN..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(0);
+              }}
+              className="pl-10"
+            />
+          </div>
         </div>
       </div>
 
@@ -101,13 +145,15 @@ export function ReviewQueue() {
       <Card className="overflow-hidden">
         {loading ? (
           <SkeletonTable rows={6} />
-        ) : filtered.length === 0 ? (
+        ) : error ? (
+          <EmptyState title="Couldn't load franchisees" message={error} icon={<ClipboardCheck className="h-8 w-8" />} />
+        ) : rows.length === 0 ? (
           <EmptyState
             title="No franchisees found"
             message={
               filter === 'all'
                 ? 'No franchisees match your search. Try a different query.'
-                : `No franchisees with ${filter} sections. Try a different filter.`
+                : `No franchisees with ${filter} status. Try a different filter.`
             }
             icon={<ClipboardCheck className="h-8 w-8" />}
             action={
@@ -129,10 +175,10 @@ export function ReviewQueue() {
                       Franchisee
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Franchisee Info
+                      Status
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Relations
+                      Source
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
                       Firms
@@ -141,16 +187,13 @@ export function ReviewQueue() {
                       Salons
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Overall
-                    </th>
-                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Submitted
+                      Created
                     </th>
                     <th className="px-3 py-3" />
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((f) => (
+                  {rows.map((f) => (
                     <tr
                       key={f.id}
                       onClick={() => navigate(`/franchisee/${f.id}`)}
@@ -158,28 +201,23 @@ export function ReviewQueue() {
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <Avatar initials={getInitials(f.pan || f.id)} size="sm" />
+                          <Avatar initials={getInitials(f.fullName || f.pan || f.id)} size="sm" />
                           <div>
                             <p className="text-sm font-medium text-ink group-hover:text-brand-700 transition-colors">
-                              Franchisee #{f.id}
+                              {f.fullName || `Franchisee #${f.id}`}
                             </p>
                             <p className="text-xs text-ink-secondary">
-                              {f.franchiseeType === 'INDIVIDUAL' ? 'Individual' : 'Company'} · {f.pan || '—'}
+                              {f.franchiseeType === 'INDIVIDUAL' ? 'Individual' : f.franchiseeType === 'COMPANY' ? 'Company' : '—'} · {f.pan || '—'}
                             </p>
                           </div>
                         </div>
                       </td>
-                      {(['FRANCHISEE_INFO', 'RELATIONS', 'FIRMS', 'SALONS'] as const).map((sec) => {
-                        const section = f.sections.find((s) => s.section === sec);
-                        return (
-                          <td key={sec} className="px-3 py-4">
-                            {section && <Badge kind={section.status} />}
-                          </td>
-                        );
-                      })}
                       <td className="px-3 py-4">
-                        <Badge kind={f.overallStatus === 'ONBOARDED' ? 'ONBOARDED' : 'INCOMPLETE'} />
+                        {f.status ? <Badge kind={f.status as 'DRAFT' | 'SUBMITTED' | 'VERIFIED' | 'REJECTED'} /> : '—'}
                       </td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">{f.source ?? '—'}</td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">{f.firmCount ?? '—'}</td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">{f.salonCount ?? '—'}</td>
                       <td className="px-3 py-4 text-sm text-ink-secondary whitespace-nowrap">
                         {formatDate(f.createdAt)}
                       </td>
@@ -194,35 +232,45 @@ export function ReviewQueue() {
 
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-brand-50">
-              {filtered.map((f) => (
+              {rows.map((f) => (
                 <div
                   key={f.id}
                   onClick={() => navigate(`/franchisee/${f.id}`)}
                   className="p-4 cursor-pointer hover:bg-brand-50/50 transition-colors active:bg-brand-50"
                 >
-                  <div className="flex items-center gap-3 mb-3">
-                    <Avatar initials={getInitials(f.pan || f.id)} size="sm" />
+                  <div className="flex items-center gap-3 mb-2">
+                    <Avatar initials={getInitials(f.fullName || f.pan || f.id)} size="sm" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-ink truncate">Franchisee #{f.id}</p>
-                      <p className="text-xs text-ink-secondary truncate">
-                        {f.franchiseeType === 'INDIVIDUAL' ? 'Individual' : 'Company'} · {formatDate(f.createdAt)}
-                      </p>
+                      <p className="text-sm font-medium text-ink truncate">{f.fullName || `Franchisee #${f.id}`}</p>
+                      <p className="text-xs text-ink-secondary truncate">{formatDate(f.createdAt)}</p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-ink-secondary/30" />
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(['FRANCHISEE_INFO', 'RELATIONS', 'FIRMS', 'SALONS'] as const).map((sec) => {
-                      const section = f.sections.find((s) => s.section === sec);
-                      return section ? (
-                        <span key={sec} className="inline-flex items-center gap-1">
-                          <span className="text-[10px] text-ink-secondary">{sectionLabels[sec]}</span>
-                          <Badge kind={section.status} />
-                        </span>
-                      ) : null;
-                    })}
-                  </div>
+                  {f.status && <Badge kind={f.status as 'DRAFT' | 'SUBMITTED' | 'VERIFIED' | 'REJECTED'} />}
                 </div>
               ))}
+            </div>
+
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-6 py-3 border-t border-brand-50">
+              <p className="text-xs text-ink-secondary">
+                {totalElements} franchisee(s) · page {page + 1} of {Math.max(totalPages, 1)}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                  <ChevronLeft className="h-4 w-4" />
+                  Prev
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={page + 1 >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </>
         )}

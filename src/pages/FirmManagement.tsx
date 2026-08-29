@@ -1,78 +1,92 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ChevronRight, Search } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Input } from '@/components/ui/Input';
+import { Input, Select } from '@/components/ui/Input';
 import { SkeletonTable } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
-import type { Firm, Franchisee } from '@/types';
+import { listFirmsAdmin } from '@/lib/firmsApi';
+import { ApiError } from '@/lib/api';
+import type { CompanyType, Firm } from '@/types';
 
-const firmTypeLabels: Record<string, string> = {
+const companyTypeLabels: Record<CompanyType, string> = {
   PROPRIETORSHIP: 'Proprietorship',
+  PARTNERSHIP: 'Partnership',
   PRIVATE_LIMITED: 'Private Limited',
   LLP: 'LLP',
 };
 
-interface FirmRow extends Firm {
-  ownerName: string;
-  ownerId: string;
-}
-
 export function FirmManagement() {
-  const { franchisees, franchiseesLoading: loading } = useApp();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [companyType, setCompanyType] = useState('');
+  const [firms, setFirms] = useState<Firm[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const data: FirmRow[] = useMemo(
-    () =>
-      franchisees.flatMap((f: Franchisee) =>
-        f.firms.map((firm: Firm) => ({
-          ...firm,
-          ownerName: `Franchisee #${f.id}`,
-          ownerId: f.id,
-        })),
-      ),
-    [franchisees],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    listFirmsAdmin({ companyType: companyType || undefined, search: search.trim() || undefined, size: 100 })
+      .then((page) => {
+        if (!cancelled) setFirms(page.content);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Failed to load companies.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [search, companyType]);
 
-  const filtered = useMemo(() => {
-    if (!search.trim()) return data;
-    const q = search.toLowerCase();
-    return data.filter(
-      (f) =>
-        f.legalName.toLowerCase().includes(q) ||
-        f.gstNumber.toLowerCase().includes(q) ||
-        f.ownerName.toLowerCase().includes(q),
-    );
-  }, [data, search]);
+  const primaryOwnerLabel = (firm: Firm) => {
+    const primary = firm.owners.find((o) => o.isPrimary) ?? firm.owners[0];
+    if (!primary) return '—';
+    return primary.franchiseeName ?? `Franchisee #${primary.franchiseeId}`;
+  };
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-ink">Firm Management</h1>
+        <h1 className="text-2xl font-bold text-ink">Company Directory</h1>
         <p className="text-sm text-ink-secondary mt-1">
-          View and manage all firms across franchisees
+          View and manage all firms (companies) across franchisees
         </p>
       </div>
 
-      <div className="relative w-full sm:w-72">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-secondary/50" />
-        <Input
-          placeholder="Search by firm name, GST, owner..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-secondary/50" />
+          <Input
+            placeholder="Search by firm name, GST..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Select value={companyType} onChange={(e) => setCompanyType(e.target.value)} className="w-full sm:w-56">
+          <option value="">All company types</option>
+          {Object.entries(companyTypeLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <Card className="overflow-hidden">
         {loading ? (
           <SkeletonTable rows={6} />
-        ) : filtered.length === 0 ? (
+        ) : error ? (
+          <EmptyState title="Couldn't load companies" message={error} icon={<Building2 className="h-8 w-8" />} />
+        ) : firms.length === 0 ? (
           <EmptyState
-            title="No firms found"
+            title="No companies found"
             message="No firms match your search. Try a different query."
             icon={<Building2 className="h-8 w-8" />}
           />
@@ -92,7 +106,10 @@ export function FirmManagement() {
                       GST
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Owner
+                      Primary Owner
+                    </th>
+                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
+                      Owners
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
                       Salons
@@ -101,7 +118,7 @@ export function FirmManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((firm) => (
+                  {firms.map((firm) => (
                     <tr
                       key={firm.id}
                       onClick={() => navigate(`/firm/${firm.id}`)}
@@ -118,10 +135,11 @@ export function FirmManagement() {
                         </div>
                       </td>
                       <td className="px-3 py-4">
-                        <Badge kind="DRAFT" label={firmTypeLabels[firm.firmType]} />
+                        <Badge kind="DRAFT" label={companyTypeLabels[firm.companyType] ?? firm.companyType} />
                       </td>
-                      <td className="px-3 py-4 text-sm text-ink-secondary font-mono">{firm.gstNumber}</td>
-                      <td className="px-3 py-4 text-sm text-ink">{firm.ownerName}</td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary font-mono">{firm.gstNumber || '—'}</td>
+                      <td className="px-3 py-4 text-sm text-ink">{primaryOwnerLabel(firm)}</td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">{firm.owners.length}</td>
                       <td className="px-3 py-4 text-sm text-ink-secondary">{firm.salons.length}</td>
                       <td className="px-3 py-4">
                         <ChevronRight className="h-4 w-4 text-ink-secondary/30 group-hover:text-brand-600 transition-colors" />
@@ -133,7 +151,7 @@ export function FirmManagement() {
             </div>
 
             <div className="md:hidden divide-y divide-brand-50">
-              {filtered.map((firm) => (
+              {firms.map((firm) => (
                 <div
                   key={firm.id}
                   onClick={() => navigate(`/firm/${firm.id}`)}
@@ -145,12 +163,16 @@ export function FirmManagement() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-ink truncate">{firm.legalName}</p>
-                      <p className="text-xs text-ink-secondary truncate">{firmTypeLabels[firm.firmType]} · {firm.ownerName}</p>
+                      <p className="text-xs text-ink-secondary truncate">
+                        {companyTypeLabels[firm.companyType] ?? firm.companyType} · {primaryOwnerLabel(firm)}
+                      </p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-ink-secondary/30" />
                   </div>
                   <div className="flex items-center gap-3 text-xs text-ink-secondary">
-                    <span className="font-mono">{firm.gstNumber}</span>
+                    <span className="font-mono">{firm.gstNumber || '—'}</span>
+                    <span>·</span>
+                    <span>{firm.owners.length} owner(s)</span>
                     <span>·</span>
                     <span>{firm.salons.length} salon(s)</span>
                   </div>
