@@ -1,4 +1,4 @@
-import type { AdminUser, Firm, Franchisee, Relation, SectionStatus, Salon } from '@/types';
+import type { AdminUser, DashboardData, Franchisee, FranchiseeSummary, Relation, SectionStatus, Firm, Salon } from '@/types';
 
 export const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8080/api/v1';
@@ -173,14 +173,15 @@ export type EnableMfaResult =
  * POST /auth/mfa/enable — completes first-time mandatory MFA setup (bearerToken = mfaToken,
  * response carries fresh tokens) or a voluntary opt-in by an already-logged-in user
  * (bearerToken = their normal accessToken, response is just a confirmation message).
+ * Per the Postman collection the code field is `code`, not `totp`.
  */
-export async function enableMfa(bearerToken: string, secret: string, totp: string): Promise<EnableMfaResult> {
+export async function enableMfa(bearerToken: string, secret: string, code: string): Promise<EnableMfaResult> {
   const data = await request<{
     accessToken?: string;
     refreshToken?: string;
     expiresIn?: number;
     message?: string;
-  }>('/auth/mfa/enable', { method: 'POST', body: { secret, totp }, auth: false, bearerToken });
+  }>('/auth/mfa/enable', { method: 'POST', body: { secret, code }, auth: false, bearerToken });
 
   if (data.accessToken) {
     return {
@@ -191,11 +192,15 @@ export async function enableMfa(bearerToken: string, secret: string, totp: strin
   return { status: 'MESSAGE', message: data.message ?? 'MFA enabled successfully.' };
 }
 
-/** POST /auth/mfa/verify — completes login for an account that already has MFA enabled. */
-export async function verifyMfa(mfaToken: string, totp: string): Promise<AuthTokens> {
+/**
+ * POST /auth/mfa/verify — completes login for an account that already has MFA enabled.
+ * Per the Postman collection, the mfaToken travels in the JSON body as `mfaToken`
+ * (not as a bearer token), alongside the `code` field.
+ */
+export async function verifyMfa(mfaToken: string, code: string): Promise<AuthTokens> {
   const data = await request<{ accessToken: string; refreshToken: string; expiresIn: number }>(
     '/auth/mfa/verify',
-    { method: 'POST', body: { totp }, auth: false, bearerToken: mfaToken },
+    { method: 'POST', body: { mfaToken, code }, auth: false },
   );
   return data;
 }
@@ -223,31 +228,53 @@ interface RawRelation {
 
 interface RawSalon {
   id: number;
-  name: string;
+  firmId?: number;
+  currentFirmId?: number;
+  salonCode?: string;
+  legacyCode?: string;
+  salonName?: string;
+  name?: string;
+  salonFormat?: string;
+  squareFootage?: number;
+  launchDate?: string;
+  inaugurationDate?: string;
+  address?: string;
   addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
+  district?: string;
   state?: string;
   pincode?: string;
-  country?: string;
-  inaugurationDate?: string;
-  currentFirmId: number;
+  region?: string;
+  contactNumber1?: string;
+  contactNumber2?: string;
+  email?: string;
+  ratecard?: string;
+  latitude?: number;
+  longitude?: number;
+  operationalStatus?: string;
+  clusterHeadId?: number;
+  regionalHeadId?: number;
+  stateHeadId?: number;
+  city?: string;
+}
+
+interface RawFirmOwner {
+  franchiseeId: number;
+  franchiseeName?: string;
+  isPrimary: boolean;
 }
 
 interface RawFirm {
   id: number;
-  franchiseeId: number;
-  name: string;
-  firmType: Firm['firmType'];
+  franchiseeId?: number;
+  name?: string;
+  legalName?: string;
+  companyType?: Firm['companyType'];
+  firmType?: Firm['companyType'];
   gstNumber?: string;
+  fpCode?: string;
   panNumber?: string;
   bankAccountNumber?: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
-  state?: string;
-  pincode?: string;
-  country?: string;
+  owners?: RawFirmOwner[];
   salons?: RawSalon[];
 }
 
@@ -273,12 +300,14 @@ interface RawFranchisee {
 
 function composeAddress(parts: {
   addressLine1?: string;
+  address?: string;
   addressLine2?: string;
   city?: string;
+  district?: string;
   state?: string;
   pincode?: string;
 }): string {
-  return [parts.addressLine1, parts.addressLine2, parts.city, parts.state, parts.pincode]
+  return [parts.addressLine1 ?? parts.address, parts.addressLine2, parts.city ?? parts.district, parts.state, parts.pincode]
     .filter((p) => p && p.trim().length > 0)
     .join(', ');
 }
@@ -304,26 +333,57 @@ function adaptRelation(r: RawRelation): Relation {
   };
 }
 
-function adaptSalon(s: RawSalon): Salon {
+export function adaptSalon(s: RawSalon): Salon {
+  const firmId = s.firmId ?? s.currentFirmId;
   return {
     id: String(s.id),
-    salonName: s.name,
+    firmId: firmId != null ? String(firmId) : '',
+    currentFirmId: firmId != null ? String(firmId) : '',
+    salonCode: s.salonCode,
+    legacyCode: s.legacyCode,
+    salonName: s.salonName ?? s.name ?? '',
+    salonFormat: s.salonFormat,
+    squareFootage: s.squareFootage,
+    launchDate: s.launchDate ?? s.inaugurationDate,
+    openingDate: s.launchDate ?? s.inaugurationDate,
     address: composeAddress(s),
-    city: s.city,
-    currentFirmId: String(s.currentFirmId),
-    openingDate: s.inaugurationDate,
+    district: s.district,
+    state: s.state,
+    pincode: s.pincode,
+    region: s.region,
+    contactNumber1: s.contactNumber1,
+    contactNumber2: s.contactNumber2,
+    email: s.email,
+    ratecard: s.ratecard,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    operationalStatus: s.operationalStatus,
+    clusterHeadId: s.clusterHeadId != null ? String(s.clusterHeadId) : undefined,
+    regionalHeadId: s.regionalHeadId != null ? String(s.regionalHeadId) : undefined,
+    stateHeadId: s.stateHeadId != null ? String(s.stateHeadId) : undefined,
+    city: s.city ?? s.district,
   };
 }
 
-function adaptFirm(f: RawFirm): Firm {
+export function adaptFirm(f: RawFirm): Firm {
+  const owners: Firm['owners'] = f.owners?.length
+    ? f.owners.map((o) => ({
+        franchiseeId: String(o.franchiseeId),
+        franchiseeName: o.franchiseeName,
+        isPrimary: o.isPrimary,
+      }))
+    : f.franchiseeId != null
+      ? [{ franchiseeId: String(f.franchiseeId), isPrimary: true }]
+      : [];
   return {
     id: String(f.id),
-    legalName: f.name,
-    firmType: f.firmType,
+    legalName: f.legalName ?? f.name ?? '',
+    companyType: (f.companyType ?? f.firmType ?? 'PROPRIETORSHIP') as Firm['companyType'],
     gstNumber: f.gstNumber ?? '',
+    fpCode: f.fpCode,
     pan: f.panNumber ?? '',
     bankAccountLast4: f.bankAccountNumber ? f.bankAccountNumber.slice(-4) : '',
-    franchiseeId: String(f.franchiseeId),
+    owners,
     salons: (f.salons ?? []).map(adaptSalon),
   };
 }
@@ -350,57 +410,103 @@ function adaptFranchisee(f: RawFranchisee): Franchisee {
   };
 }
 
-export async function listFranchisees(
-  params: { sectionStatus?: string; page?: number; size?: number } = {},
-): Promise<Franchisee[]> {
-  const qs = new URLSearchParams();
-  if (params.sectionStatus) qs.set('sectionStatus', params.sectionStatus);
-  qs.set('page', String(params.page ?? 0));
-  qs.set('size', String(params.size ?? 200));
-  const data = await request<{ content: RawFranchisee[] }>(`/franchisees?${qs.toString()}`);
-  return data.content.map(adaptFranchisee);
-}
-
 export async function getFranchisee(id: string): Promise<Franchisee> {
   const data = await request<RawFranchisee>(`/franchisees/${id}`);
   return adaptFranchisee(data);
 }
 
+/** POST /api/v1/admin/franchisees/:id/sections/:section/verify (moved under /admin in this backend version). */
 export async function verifySection(franchiseeId: string, section: string): Promise<void> {
-  await request(`/franchisees/${franchiseeId}/sections/${section}/verify`, { method: 'POST' });
+  await request(`/admin/franchisees/${franchiseeId}/sections/${section}/verify`, { method: 'POST' });
 }
 
-export async function rejectSection(franchiseeId: string, section: string, rejectionReason: string): Promise<void> {
-  await request(`/franchisees/${franchiseeId}/sections/${section}/reject`, {
+/** POST /api/v1/admin/franchisees/:id/sections/:section/reject — body field is `reason`. */
+export async function rejectSection(franchiseeId: string, section: string, reason: string): Promise<void> {
+  await request(`/admin/franchisees/${franchiseeId}/sections/${section}/reject`, {
     method: 'POST',
-    body: { rejectionReason },
+    body: { reason },
   });
 }
 
-export async function transferFirmOwnership(
-  firmId: string,
-  newFranchiseeId: string,
-  reason: string,
-): Promise<void> {
-  await request(`/firms/${firmId}/transfer-ownership`, {
-    method: 'POST',
-    body: {
-      newFranchiseeId: Number(newFranchiseeId),
-      transferDate: new Date().toISOString().slice(0, 10),
-      reason,
-    },
-  });
+// ---------------------------------------------------------------------------
+// Admin — Franchisee directory + dashboard
+// ---------------------------------------------------------------------------
+
+export interface FranchiseeDirectoryParams {
+  status?: string;
+  source?: string;
+  search?: string;
+  sortBy?: string;
+  direction?: 'ASC' | 'DESC';
+  page?: number;
+  size?: number;
 }
 
-export async function transferSalonFirm(salonId: string, newFirmId: string, reason: string): Promise<void> {
-  await request(`/salons/${salonId}/transfer-firm`, {
-    method: 'POST',
-    body: {
-      newFirmId: Number(newFirmId),
-      transferDate: new Date().toISOString().slice(0, 10),
-      reason,
-    },
-  });
+export interface FranchiseeDirectoryPage {
+  content: FranchiseeSummary[];
+  totalElements: number;
+  totalPages: number;
+  page: number;
+  size: number;
+}
+
+/**
+ * GET /api/v1/admin/franchisees — list response shape not verified live.
+ * We accept either a Spring-style Page<> envelope ({content, totalElements, ...})
+ * or a bare array, and adapt each row defensively since the exact summary DTO
+ * field names (fullName vs name, firmCount, etc.) are unconfirmed.
+ */
+export async function listFranchiseesAdmin(params: FranchiseeDirectoryParams = {}): Promise<FranchiseeDirectoryPage> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set('status', params.status);
+  if (params.source) qs.set('source', params.source);
+  if (params.search) qs.set('search', params.search);
+  if (params.sortBy) qs.set('sortBy', params.sortBy);
+  if (params.direction) qs.set('direction', params.direction);
+  qs.set('page', String(params.page ?? 0));
+  qs.set('size', String(params.size ?? 20));
+
+  const data = await request<unknown>(`/admin/franchisees?${qs.toString()}`);
+  const raw = data as Record<string, unknown>;
+  const contentArr: Record<string, unknown>[] = Array.isArray(data)
+    ? (data as Record<string, unknown>[])
+    : (Array.isArray(raw?.content) ? (raw.content as Record<string, unknown>[]) : []);
+
+  const content: FranchiseeSummary[] = contentArr.map((r) => ({
+    id: String(r.id ?? r.franchiseeId ?? ''),
+    fullName: (r.fullName as string) ?? (r.name as string) ?? undefined,
+    franchiseeType: r.franchiseeType as FranchiseeSummary['franchiseeType'],
+    pan: (r.pan as string) ?? (r.panNumber as string) ?? undefined,
+    contact: r.contact as string | undefined,
+    email: r.email as string | undefined,
+    status: (r.status as string) ?? (r.overallStatus as string) ?? undefined,
+    source: r.source as string | undefined,
+    firmCount: (r.firmCount as number) ?? (Array.isArray(r.firms) ? (r.firms as unknown[]).length : undefined),
+    salonCount: r.salonCount as number | undefined,
+    createdAt: r.createdAt as string | undefined,
+  }));
+
+  return {
+    content,
+    totalElements: (raw?.totalElements as number) ?? content.length,
+    totalPages: (raw?.totalPages as number) ?? 1,
+    page: (raw?.number as number) ?? (raw?.page as number) ?? (params.page ?? 0),
+    size: (raw?.size as number) ?? (params.size ?? 20),
+  };
+}
+
+/** GET /api/v1/admin/dashboard — response shape unverified; returned as-is for the page to consume defensively. */
+export async function getDashboard(): Promise<DashboardData> {
+  return request<DashboardData>('/admin/dashboard');
+}
+
+export interface UpcomingImportantDate {
+  [key: string]: unknown;
+}
+
+export async function getUpcomingImportantDates(withinDays = 30): Promise<UpcomingImportantDate[]> {
+  const data = await request<unknown>(`/admin/important-dates/upcoming?withinDays=${withinDays}`);
+  return Array.isArray(data) ? (data as UpcomingImportantDate[]) : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -417,19 +523,20 @@ interface RawUserResponse {
   roles: string[];
 }
 
+/** POST /api/v1/admin/users — roleName is a single string, not an array. */
 export async function createAdminUser(input: {
   fullName: string;
   email: string;
-  phoneNumber?: string;
-  roleNames: string[];
+  phone?: string;
+  roleName: string;
 }): Promise<AdminUser> {
   const data = await request<RawUserResponse>('/admin/users', {
     method: 'POST',
     body: {
       fullName: input.fullName,
       email: input.email,
-      phoneNumber: input.phoneNumber,
-      roleNames: input.roleNames,
+      phone: input.phone,
+      roleName: input.roleName,
     },
   });
   return {

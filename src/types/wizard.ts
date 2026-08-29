@@ -1,18 +1,11 @@
 /**
- * "Add Franchisee" wizard — types for the legacy/real data-entry flow.
+ * "Add Franchisee" wizard — types for the admin data-entry flow.
  *
- * UNCONFIRMED CONTRACT (except where noted): the backend "Add Franchisee" endpoints
- * (POST /admin/franchisees, POST /admin/firms, POST /admin/firms/{firmId}/salons,
- * GET /admin/franchisees/{id}/completion) could not be verified against real backend
- * source — no backend repo was available in this environment. Most field names below
- * are still a best guess taken from the original prompt, not a confirmed DTO.
- *
- * The firm creation contract (WizardFirmInput / WizardFirm / WizardFirmOwner) is now
- * confirmed against the real `AdminCreateFirmRequest` DTO for
- * POST /api/v1/admin/firms — see the fix that corrected `companyType` → `firmType`
- * and `ownerIds`/`primaryOwnerId` → `owners: { franchiseeId, isPrimary }[]`.
- * Everything else (owner/salon/completion/document shapes) remains unverified.
- * Reconcile against the actual backend source before relying on the rest in production.
+ * Field names below are aligned to the confirmed request DTOs in
+ * docs/FMSBE_postman_collection.json (POST /admin/franchisees, POST /admin/firms,
+ * POST /admin/salons, POST /admin/salons/{salonId}/agreements). Response shapes for
+ * these endpoints are not verified live — adapters in wizardApi.ts fall back to the
+ * submitted input when a field is absent from the response.
  */
 
 export type FranchiseeType = 'INDIVIDUAL' | 'COMPANY';
@@ -25,11 +18,7 @@ export interface WizardOwnerInput {
   email?: string;
   pan: string;
   aadhaar?: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
-  state?: string;
-  pincode?: string;
+  address?: string;
   franchiseeType: FranchiseeType;
 }
 
@@ -37,8 +26,7 @@ export interface WizardOwner extends WizardOwnerInput {
   id: string;
 }
 
-/** Confirmed against AdminCreateFirmRequest — POST /api/v1/admin/firms. */
-export type FirmType = 'PROPRIETORSHIP' | 'PARTNERSHIP' | 'PRIVATE_LIMITED' | 'LLP';
+export type CompanyType = 'PROPRIETORSHIP' | 'PARTNERSHIP' | 'PRIVATE_LIMITED' | 'LLP';
 
 export interface WizardFirmOwner {
   franchiseeId: number;
@@ -47,7 +35,7 @@ export interface WizardFirmOwner {
 
 export interface WizardFirmInput {
   legalName: string;
-  firmType: FirmType;
+  companyType: CompanyType;
   gstNumber?: string;
   fpCode?: string;
   owners: WizardFirmOwner[];
@@ -55,22 +43,21 @@ export interface WizardFirmInput {
 
 export interface WizardFirm {
   id: string;
-  /** Primary owner's franchisee id, per the confirmed response shape. */
+  /** Primary owner's franchisee id. */
   franchiseeId: string;
   legalName: string;
-  firmType: FirmType;
+  companyType: CompanyType;
   gstNumber?: string;
   fpCode?: string;
   owners: WizardFirmOwner[];
 }
 
 export interface WizardAgreementInput {
-  validFrom?: string;
-  validTill?: string;
-  year?: string;
-  renewalYear?: string;
+  validFrom: string;
+  validTill: string;
+  contractYear?: number;
+  renewalYear?: number;
   royaltyTerms?: string;
-  status?: string;
 }
 
 export interface WizardSalonInput {
@@ -78,24 +65,24 @@ export interface WizardSalonInput {
   salonCode?: string;
   legacyCode?: string;
   salonName: string;
-  format?: string;
-  sqft?: string;
+  salonFormat?: string;
+  squareFootage?: number;
   launchDate?: string;
+  address?: string;
   district?: string;
   state?: string;
   pincode?: string;
-  addressLine1?: string;
-  contact1?: string;
-  contact2?: string;
+  region?: string;
+  contactNumber1?: string;
+  contactNumber2?: string;
   email?: string;
   ratecard?: string;
-  latitude?: string;
-  longitude?: string;
-  status?: string;
-  clusterHead?: string;
-  regionalHead?: string;
-  stateHead?: string;
-  region?: string;
+  latitude?: number;
+  longitude?: number;
+  operationalStatus?: string;
+  clusterHeadId?: number;
+  regionalHeadId?: number;
+  stateHeadId?: number;
   agreement?: WizardAgreementInput;
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -21,19 +21,22 @@ import { ProgressRing } from '@/components/ui/ProgressRing';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { useToast } from '@/components/ui/Toast';
 import * as wizardApi from '@/lib/wizardApi';
+import { uploadDocument } from '@/lib/documentsApi';
+import { listOfficials } from '@/lib/officialsApi';
 import { ApiError } from '@/lib/api';
 import type {
-  FirmType,
+  CompanyType,
   FranchiseeType,
   WizardAgreementInput,
   WizardFirm,
   WizardOwner,
   WizardSalon,
 } from '@/types/wizard';
+import type { Official } from '@/types';
 
 type Step = 1 | 2 | 3;
 
-const firmTypeOptions: { value: FirmType; label: string }[] = [
+const companyTypeOptions: { value: CompanyType; label: string }[] = [
   { value: 'PROPRIETORSHIP', label: 'Proprietorship' },
   { value: 'PARTNERSHIP', label: 'Partnership' },
   { value: 'PRIVATE_LIMITED', label: 'Private Limited' },
@@ -48,17 +51,13 @@ const emptyOwnerForm = {
   email: '',
   pan: '',
   aadhaar: '',
-  addressLine1: '',
-  addressLine2: '',
-  city: '',
-  state: '',
-  pincode: '',
+  address: '',
   franchiseeType: 'INDIVIDUAL' as FranchiseeType,
 };
 
 const emptyFirmForm = {
   legalName: '',
-  firmType: '' as FirmType | '',
+  companyType: '' as CompanyType | '',
   gstNumber: '',
   fpCode: '',
 };
@@ -67,33 +66,32 @@ const emptySalonForm = {
   salonCode: '',
   legacyCode: '',
   salonName: '',
-  format: '',
-  sqft: '',
+  salonFormat: '',
+  squareFootage: '',
   launchDate: '',
   district: '',
   state: '',
   pincode: '',
-  addressLine1: '',
-  contact1: '',
-  contact2: '',
+  address: '',
+  contactNumber1: '',
+  contactNumber2: '',
   email: '',
   ratecard: '',
   latitude: '',
   longitude: '',
-  status: '',
-  clusterHead: '',
-  regionalHead: '',
-  stateHead: '',
+  operationalStatus: '',
+  clusterHeadId: '',
+  regionalHeadId: '',
+  stateHeadId: '',
   region: '',
 };
 
 const emptyAgreementForm = {
   validFrom: '',
   validTill: '',
-  year: '',
+  contractYear: '',
   renewalYear: '',
   royaltyTerms: '',
-  status: '',
 };
 
 export function AddFranchiseeWizard() {
@@ -109,6 +107,22 @@ export function AddFranchiseeWizard() {
   const [salons, setSalons] = useState<WizardSalon[]>([]);
 
   const [completion, setCompletion] = useState<number | null>(null);
+
+  const [officials, setOfficials] = useState<Official[]>([]);
+  useEffect(() => {
+    listOfficials({ size: 500 })
+      .then((page) => setOfficials(page.content))
+      .catch(() => {
+        // Officials selectors just show empty lists if this fails — not blocking.
+      });
+  }, []);
+  const officialsByType = useMemo(() => {
+    const map: Record<string, Official[]> = {};
+    for (const o of officials) {
+      (map[o.officialType] ??= []).push(o);
+    }
+    return map;
+  }, [officials]);
 
   // Step 1 — owner form
   const [ownerForm, setOwnerForm] = useState(emptyOwnerForm);
@@ -177,11 +191,7 @@ export function AddFranchiseeWizard() {
         email: ownerForm.email.trim() || undefined,
         pan: ownerForm.pan.trim(),
         aadhaar: ownerForm.aadhaar.trim() || undefined,
-        addressLine1: ownerForm.addressLine1.trim() || undefined,
-        addressLine2: ownerForm.addressLine2.trim() || undefined,
-        city: ownerForm.city.trim() || undefined,
-        state: ownerForm.state.trim() || undefined,
-        pincode: ownerForm.pincode.trim() || undefined,
+        address: ownerForm.address.trim() || undefined,
         franchiseeType: ownerForm.franchiseeType,
       });
       setOwners((prev) => [...prev, created]);
@@ -190,7 +200,7 @@ export function AddFranchiseeWizard() {
       if (ownerDoc) {
         setOwnerDocUploading(true);
         try {
-          await wizardApi.uploadWizardDocument('FRANCHISEE', created.id, 'OWNER_ID_PROOF', ownerDoc);
+          await uploadDocument('FRANCHISEE', created.id, 'OWNER_ID_PROOF', ownerDoc);
         } catch (err) {
           showToast('error', errorMessage(err, 'Owner saved, but the ID proof document failed to upload.'));
         } finally {
@@ -224,7 +234,7 @@ export function AddFranchiseeWizard() {
   const validateFirm = () => {
     const e: Record<string, string> = {};
     if (!firmForm.legalName.trim()) e.legalName = 'Legal name is required';
-    if (!firmForm.firmType) e.firmType = 'Firm type is required';
+    if (!firmForm.companyType) e.companyType = 'Company type is required';
     if (selectedOwnerIds.length === 0) e.owners = 'Select at least one owner';
     else if (!primaryOwnerId) e.owners = 'Mark exactly one selected owner as Primary';
     setFirmErrors(e);
@@ -232,12 +242,12 @@ export function AddFranchiseeWizard() {
   };
 
   const handleSaveFirm = async () => {
-    if (!validateFirm() || !firmForm.firmType) return;
+    if (!validateFirm() || !firmForm.companyType) return;
     setFirmSaving(true);
     try {
       const created = await wizardApi.createWizardFirm({
         legalName: firmForm.legalName.trim(),
-        firmType: firmForm.firmType,
+        companyType: firmForm.companyType,
         gstNumber: firmForm.gstNumber.trim() || undefined,
         fpCode: firmForm.fpCode.trim() || undefined,
         owners: selectedOwnerIds.map((id) => ({
@@ -251,7 +261,7 @@ export function AddFranchiseeWizard() {
       if (firmDoc) {
         setFirmDocUploading(true);
         try {
-          await wizardApi.uploadWizardDocument('FIRM', created.id, 'FIRM_GST_CERTIFICATE', firmDoc);
+          await uploadDocument('FIRM', created.id, 'FIRM_GST_CERTIFICATE', firmDoc);
         } catch (err) {
           showToast('error', errorMessage(err, 'Business saved, but the GST certificate failed to upload.'));
         } finally {
@@ -286,15 +296,13 @@ export function AddFranchiseeWizard() {
 
   const buildAgreement = (): WizardAgreementInput | undefined => {
     if (!agreementOpen) return undefined;
-    const hasAny = Object.values(agreementForm).some((v) => v.trim().length > 0);
-    if (!hasAny) return undefined;
+    if (!agreementForm.validFrom || !agreementForm.validTill) return undefined;
     return {
-      validFrom: agreementForm.validFrom || undefined,
-      validTill: agreementForm.validTill || undefined,
-      year: agreementForm.year.trim() || undefined,
-      renewalYear: agreementForm.renewalYear.trim() || undefined,
+      validFrom: agreementForm.validFrom,
+      validTill: agreementForm.validTill,
+      contractYear: agreementForm.contractYear ? Number(agreementForm.contractYear) : undefined,
+      renewalYear: agreementForm.renewalYear ? Number(agreementForm.renewalYear) : undefined,
       royaltyTerms: agreementForm.royaltyTerms.trim() || undefined,
-      status: agreementForm.status.trim() || undefined,
     };
   };
 
@@ -307,23 +315,23 @@ export function AddFranchiseeWizard() {
         salonCode: salonForm.salonCode.trim() || undefined,
         legacyCode: salonForm.legacyCode.trim() || undefined,
         salonName: salonForm.salonName.trim(),
-        format: salonForm.format.trim() || undefined,
-        sqft: salonForm.sqft.trim() || undefined,
+        salonFormat: salonForm.salonFormat.trim() || undefined,
+        squareFootage: salonForm.squareFootage ? Number(salonForm.squareFootage) : undefined,
         launchDate: salonForm.launchDate || undefined,
         district: salonForm.district.trim() || undefined,
         state: salonForm.state.trim() || undefined,
         pincode: salonForm.pincode.trim() || undefined,
-        addressLine1: salonForm.addressLine1.trim() || undefined,
-        contact1: salonForm.contact1.trim() || undefined,
-        contact2: salonForm.contact2.trim() || undefined,
+        address: salonForm.address.trim() || undefined,
+        contactNumber1: salonForm.contactNumber1.trim() || undefined,
+        contactNumber2: salonForm.contactNumber2.trim() || undefined,
         email: salonForm.email.trim() || undefined,
         ratecard: salonForm.ratecard.trim() || undefined,
-        latitude: salonForm.latitude.trim() || undefined,
-        longitude: salonForm.longitude.trim() || undefined,
-        status: salonForm.status.trim() || undefined,
-        clusterHead: salonForm.clusterHead.trim() || undefined,
-        regionalHead: salonForm.regionalHead.trim() || undefined,
-        stateHead: salonForm.stateHead.trim() || undefined,
+        latitude: salonForm.latitude ? Number(salonForm.latitude) : undefined,
+        longitude: salonForm.longitude ? Number(salonForm.longitude) : undefined,
+        operationalStatus: salonForm.operationalStatus.trim() || undefined,
+        clusterHeadId: salonForm.clusterHeadId ? Number(salonForm.clusterHeadId) : undefined,
+        regionalHeadId: salonForm.regionalHeadId ? Number(salonForm.regionalHeadId) : undefined,
+        stateHeadId: salonForm.stateHeadId ? Number(salonForm.stateHeadId) : undefined,
         region: salonForm.region.trim() || undefined,
         agreement: buildAgreement(),
       });
@@ -333,7 +341,7 @@ export function AddFranchiseeWizard() {
       if (salonDoc) {
         setSalonDocUploading(true);
         try {
-          await wizardApi.uploadWizardDocument('SALON', created.id, 'SALON_AGREEMENT', salonDoc);
+          await uploadDocument('SALON', created.id, 'SALON_AGREEMENT', salonDoc);
         } catch (err) {
           showToast('error', errorMessage(err, 'Salon saved, but the agreement document failed to upload.'));
         } finally {
@@ -562,31 +570,10 @@ export function AddFranchiseeWizard() {
                   <option value="COMPANY">Company</option>
                 </Select>
                 <Input
-                  label="Address Line 1"
-                  value={ownerForm.addressLine1}
-                  onChange={(e) => setOwnerForm({ ...ownerForm, addressLine1: e.target.value })}
+                  label="Address"
+                  value={ownerForm.address}
+                  onChange={(e) => setOwnerForm({ ...ownerForm, address: e.target.value })}
                   className="sm:col-span-2"
-                />
-                <Input
-                  label="Address Line 2"
-                  value={ownerForm.addressLine2}
-                  onChange={(e) => setOwnerForm({ ...ownerForm, addressLine2: e.target.value })}
-                  className="sm:col-span-2"
-                />
-                <Input
-                  label="City"
-                  value={ownerForm.city}
-                  onChange={(e) => setOwnerForm({ ...ownerForm, city: e.target.value })}
-                />
-                <Input
-                  label="State"
-                  value={ownerForm.state}
-                  onChange={(e) => setOwnerForm({ ...ownerForm, state: e.target.value })}
-                />
-                <Input
-                  label="Pincode"
-                  value={ownerForm.pincode}
-                  onChange={(e) => setOwnerForm({ ...ownerForm, pincode: e.target.value })}
                 />
               </div>
 
@@ -632,18 +619,18 @@ export function AddFranchiseeWizard() {
                 />
                 <div>
                   <Select
-                    label="Firm Type"
-                    value={firmForm.firmType}
-                    onChange={(e) => setFirmForm({ ...firmForm, firmType: e.target.value as FirmType })}
+                    label="Company Type"
+                    value={firmForm.companyType}
+                    onChange={(e) => setFirmForm({ ...firmForm, companyType: e.target.value as CompanyType })}
                   >
-                    <option value="">Select a firm type...</option>
-                    {firmTypeOptions.map((opt) => (
+                    <option value="">Select a company type...</option>
+                    {companyTypeOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
                       </option>
                     ))}
                   </Select>
-                  {firmErrors.firmType && <p className="text-xs text-status-rejected mt-1.5">{firmErrors.firmType}</p>}
+                  {firmErrors.companyType && <p className="text-xs text-status-rejected mt-1.5">{firmErrors.companyType}</p>}
                 </div>
                 <Input
                   label="GST Number"
@@ -772,13 +759,15 @@ export function AddFranchiseeWizard() {
                 />
                 <Input
                   label="Format"
-                  value={salonForm.format}
-                  onChange={(e) => setSalonForm({ ...salonForm, format: e.target.value })}
+                  placeholder="e.g. UNISEX"
+                  value={salonForm.salonFormat}
+                  onChange={(e) => setSalonForm({ ...salonForm, salonFormat: e.target.value })}
                 />
                 <Input
                   label="Sq.ft"
-                  value={salonForm.sqft}
-                  onChange={(e) => setSalonForm({ ...salonForm, sqft: e.target.value })}
+                  type="number"
+                  value={salonForm.squareFootage}
+                  onChange={(e) => setSalonForm({ ...salonForm, squareFootage: e.target.value })}
                 />
                 <Input
                   label="Launch Date"
@@ -787,14 +776,15 @@ export function AddFranchiseeWizard() {
                   onChange={(e) => setSalonForm({ ...salonForm, launchDate: e.target.value })}
                 />
                 <Input
-                  label="Status"
-                  value={salonForm.status}
-                  onChange={(e) => setSalonForm({ ...salonForm, status: e.target.value })}
+                  label="Operational Status"
+                  placeholder="e.g. ACTIVE"
+                  value={salonForm.operationalStatus}
+                  onChange={(e) => setSalonForm({ ...salonForm, operationalStatus: e.target.value })}
                 />
                 <Input
                   label="Address"
-                  value={salonForm.addressLine1}
-                  onChange={(e) => setSalonForm({ ...salonForm, addressLine1: e.target.value })}
+                  value={salonForm.address}
+                  onChange={(e) => setSalonForm({ ...salonForm, address: e.target.value })}
                   className="sm:col-span-2"
                 />
                 <Input
@@ -813,14 +803,19 @@ export function AddFranchiseeWizard() {
                   onChange={(e) => setSalonForm({ ...salonForm, pincode: e.target.value })}
                 />
                 <Input
+                  label="Region"
+                  value={salonForm.region}
+                  onChange={(e) => setSalonForm({ ...salonForm, region: e.target.value })}
+                />
+                <Input
                   label="Contact Number 1"
-                  value={salonForm.contact1}
-                  onChange={(e) => setSalonForm({ ...salonForm, contact1: e.target.value })}
+                  value={salonForm.contactNumber1}
+                  onChange={(e) => setSalonForm({ ...salonForm, contactNumber1: e.target.value })}
                 />
                 <Input
                   label="Contact Number 2"
-                  value={salonForm.contact2}
-                  onChange={(e) => setSalonForm({ ...salonForm, contact2: e.target.value })}
+                  value={salonForm.contactNumber2}
+                  onChange={(e) => setSalonForm({ ...salonForm, contactNumber2: e.target.value })}
                 />
                 <Input
                   label="Email"
@@ -835,34 +830,55 @@ export function AddFranchiseeWizard() {
                 />
                 <Input
                   label="Latitude"
+                  type="number"
                   value={salonForm.latitude}
                   onChange={(e) => setSalonForm({ ...salonForm, latitude: e.target.value })}
                 />
                 <Input
                   label="Longitude"
+                  type="number"
                   value={salonForm.longitude}
                   onChange={(e) => setSalonForm({ ...salonForm, longitude: e.target.value })}
                 />
-                <Input
+
+                {/* Officials selectors — clusterHead/regionalHead/stateHead are now real
+                    references into the Officials directory, filtered by matching type. */}
+                <Select
                   label="Cluster Head"
-                  value={salonForm.clusterHead}
-                  onChange={(e) => setSalonForm({ ...salonForm, clusterHead: e.target.value })}
-                />
-                <Input
+                  value={salonForm.clusterHeadId}
+                  onChange={(e) => setSalonForm({ ...salonForm, clusterHeadId: e.target.value })}
+                >
+                  <option value="">Select a cluster manager...</option>
+                  {(officialsByType.CLUSTER_MANAGER ?? []).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} {o.region ? `(${o.region})` : ''}
+                    </option>
+                  ))}
+                </Select>
+                <Select
                   label="Regional Head"
-                  value={salonForm.regionalHead}
-                  onChange={(e) => setSalonForm({ ...salonForm, regionalHead: e.target.value })}
-                />
-                <Input
+                  value={salonForm.regionalHeadId}
+                  onChange={(e) => setSalonForm({ ...salonForm, regionalHeadId: e.target.value })}
+                >
+                  <option value="">Select a regional manager...</option>
+                  {(officialsByType.REGIONAL_MANAGER ?? []).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} {o.region ? `(${o.region})` : ''}
+                    </option>
+                  ))}
+                </Select>
+                <Select
                   label="State Head"
-                  value={salonForm.stateHead}
-                  onChange={(e) => setSalonForm({ ...salonForm, stateHead: e.target.value })}
-                />
-                <Input
-                  label="Region"
-                  value={salonForm.region}
-                  onChange={(e) => setSalonForm({ ...salonForm, region: e.target.value })}
-                />
+                  value={salonForm.stateHeadId}
+                  onChange={(e) => setSalonForm({ ...salonForm, stateHeadId: e.target.value })}
+                >
+                  <option value="">Select a state head...</option>
+                  {(officialsByType.STATE_HEAD ?? []).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} {o.region ? `(${o.region})` : ''}
+                    </option>
+                  ))}
+                </Select>
               </div>
 
               {/* Collapsible agreement section */}
@@ -890,12 +906,14 @@ export function AddFranchiseeWizard() {
                       onChange={(e) => setAgreementForm({ ...agreementForm, validTill: e.target.value })}
                     />
                     <Input
-                      label="Year"
-                      value={agreementForm.year}
-                      onChange={(e) => setAgreementForm({ ...agreementForm, year: e.target.value })}
+                      label="Contract Year"
+                      type="number"
+                      value={agreementForm.contractYear}
+                      onChange={(e) => setAgreementForm({ ...agreementForm, contractYear: e.target.value })}
                     />
                     <Input
                       label="Renewal Year"
+                      type="number"
                       value={agreementForm.renewalYear}
                       onChange={(e) => setAgreementForm({ ...agreementForm, renewalYear: e.target.value })}
                     />
@@ -905,11 +923,10 @@ export function AddFranchiseeWizard() {
                       onChange={(e) => setAgreementForm({ ...agreementForm, royaltyTerms: e.target.value })}
                       className="sm:col-span-2"
                     />
-                    <Input
-                      label="Agreement Status"
-                      value={agreementForm.status}
-                      onChange={(e) => setAgreementForm({ ...agreementForm, status: e.target.value })}
-                    />
+                    <p className="sm:col-span-2 text-xs text-ink-secondary">
+                      Both Valid From and Valid Till are required for the agreement to be sent — leave either blank
+                      to skip creating an agreement for now.
+                    </p>
                   </div>
                 )}
               </div>
