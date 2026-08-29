@@ -18,8 +18,9 @@ import { AddFranchiseeWizard } from '@/pages/AddFranchiseeWizard';
 import { OfficialsManagement } from '@/pages/OfficialsManagement';
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { currentUser } = useApp();
+  const { currentUser, authInitializing } = useApp();
   const location = useLocation();
+  if (authInitializing) return null;
   if (!currentUser) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
@@ -27,7 +28,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 function RedirectIfAuthed({ children }: { children: ReactNode }) {
-  const { currentUser } = useApp();
+  const { currentUser, authInitializing } = useApp();
+  if (authInitializing) return null;
   if (currentUser) return <Navigate to="/" replace />;
   return <>{children}</>;
 }

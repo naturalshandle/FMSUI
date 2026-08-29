@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useCallback, useContext, useState } from 'react';
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { AdminUser, CurrentUser } from '@/types';
 import * as api from '@/lib/api';
 import { decodeJwt } from '@/lib/jwt';
@@ -13,6 +13,7 @@ export interface PendingMfa {
 interface AppState {
   // Auth
   currentUser: CurrentUser | null;
+  authInitializing: boolean;
   authError: string | null;
   authLoading: boolean;
   login: (email: string, password: string) => Promise<LoginOutcome>;
@@ -51,12 +52,26 @@ function userFromStoredToken(): CurrentUser | null {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => userFromStoredToken());
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [authInitializing, setAuthInitializing] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [pendingMfa, setPendingMfa] = useState<PendingMfa | null>(null);
 
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const restored = await api.restoreSession();
+      if (cancelled) return;
+      setCurrentUser(restored ? userFromStoredToken() : null);
+      setAuthInitializing(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<LoginOutcome> => {
     setAuthError(null);
@@ -144,6 +159,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider
       value={{
         currentUser,
+        authInitializing,
         authError,
         authLoading,
         login,

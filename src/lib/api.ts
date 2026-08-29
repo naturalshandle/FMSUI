@@ -3,11 +3,16 @@ import type { AdminUser, DashboardData, Franchisee, FranchiseeSummary, Relation,
 export const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8080/api/v1';
 
-const ACCESS_TOKEN_KEY = 'fms_access_token';
 const REFRESH_TOKEN_KEY = 'fms_refresh_token';
 
+// The access token lives in memory only — never in localStorage/sessionStorage —
+// so it can't be read by an XSS payload that persists across a full page reload.
+// It's lost on reload by design; restoreSession() below re-derives it from the
+// refresh token (the only credential kept in localStorage).
+let accessTokenMem: string | null = null;
+
 export function getAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return accessTokenMem;
 }
 
 export function getRefreshToken(): string | null {
@@ -15,12 +20,12 @@ export function getRefreshToken(): string | null {
 }
 
 export function setTokens(accessToken: string, refreshToken: string): void {
-  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  accessTokenMem = accessToken;
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  accessTokenMem = null;
   localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
@@ -33,6 +38,21 @@ export class ApiError extends Error {
 }
 
 let refreshPromise: Promise<boolean> | null = null;
+
+/**
+ * Re-derives an in-memory access token from the persisted refresh token on
+ * app load (page reload/new tab), since the access token itself is never
+ * persisted. Returns true if a valid session was restored.
+ */
+export function restoreSession(): Promise<boolean> {
+  if (!getRefreshToken()) return Promise.resolve(false);
+  if (!refreshPromise) {
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
 
 async function doRefresh(): Promise<boolean> {
   const refreshToken = getRefreshToken();
