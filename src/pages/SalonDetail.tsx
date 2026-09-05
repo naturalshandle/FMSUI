@@ -14,6 +14,7 @@ import {
   Ban,
   ChevronDown,
   ChevronUp,
+  Percent,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -24,7 +25,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { getSalon, transferSalonFirm } from '@/lib/salonsApi';
-import { listFirmsAdmin } from '@/lib/firmsApi';
+import { getFirm, listFirmsAdmin } from '@/lib/firmsApi';
 import { listOfficials } from '@/lib/officialsApi';
 import {
   listAgreements,
@@ -33,8 +34,9 @@ import {
   renewAgreement,
   terminateAgreement,
 } from '@/lib/agreementsApi';
+import { createRoyaltyRequest, listRoyaltyHistory, royaltyStatusBadgeKind } from '@/lib/royaltyApi';
 import { ApiError } from '@/lib/api';
-import type { Agreement, Firm, Official, Salon } from '@/types';
+import type { Agreement, Firm, Official, RoyaltyRequest, Salon } from '@/types';
 
 function formatDate(iso?: string): string {
   if (!iso) return '—';
@@ -72,6 +74,15 @@ export function SalonDetail() {
   const [terminateReason, setTerminateReason] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Royalty
+  const [royaltyHistory, setRoyaltyHistory] = useState<RoyaltyRequest[]>([]);
+  const [royaltyHistoryLoading, setRoyaltyHistoryLoading] = useState(true);
+  const [royaltyModal, setRoyaltyModal] = useState(false);
+  const [currentFirmOwners, setCurrentFirmOwners] = useState<Firm['owners']>([]);
+  const [royaltyFranchiseeId, setRoyaltyFranchiseeId] = useState('');
+  const [royaltyForm, setRoyaltyForm] = useState({ newPercentage: '', reason: '', instructedBy: '' });
+  const [royaltyBusy, setRoyaltyBusy] = useState(false);
+
   const load = useCallback(() => {
     if (!id) return;
     setLoading(true);
@@ -91,10 +102,20 @@ export function SalonDetail() {
       .finally(() => setAgreementsLoading(false));
   }, [id]);
 
+  const loadRoyaltyHistory = useCallback(() => {
+    if (!id) return;
+    setRoyaltyHistoryLoading(true);
+    listRoyaltyHistory(id)
+      .then(setRoyaltyHistory)
+      .catch(() => setRoyaltyHistory([]))
+      .finally(() => setRoyaltyHistoryLoading(false));
+  }, [id]);
+
   useEffect(() => {
     load();
     loadAgreements();
-  }, [load, loadAgreements]);
+    loadRoyaltyHistory();
+  }, [load, loadAgreements, loadRoyaltyHistory]);
 
   useEffect(() => {
     listOfficials({ size: 500 })
@@ -109,10 +130,40 @@ export function SalonDetail() {
       .catch(() => setFirms([]));
   }, [transferModal]);
 
+  // Loaded unconditionally (not just when the request modal opens) so Royalty History
+  // rows can also resolve franchiseeId to a display name.
+  useEffect(() => {
+    if (!salon?.firmId) return;
+    getFirm(salon.firmId)
+      .then((firm) => setCurrentFirmOwners(firm.owners))
+      .catch(() => setCurrentFirmOwners([]));
+  }, [salon?.firmId]);
+
+  useEffect(() => {
+    if (!royaltyModal) return;
+    const primary = currentFirmOwners.find((o) => o.isPrimary) ?? currentFirmOwners[0];
+    setRoyaltyFranchiseeId(primary ? primary.franchiseeId : '');
+  }, [royaltyModal, currentFirmOwners]);
+
   const officialName = (officialId?: string) => {
     if (!officialId) return '—';
     const o = officials.find((of) => of.id === officialId);
     return o ? o.name : `#${officialId}`;
+  };
+
+  /** Royalty request response is IDs-only; resolve a login user id to a name via the
+   * already-loaded Officials list (Official.userId links an official to a login user).
+   * Falls back to "User #id" when no match — most likely an Admin, who isn't an Official. */
+  const userName = (userId?: string) => {
+    if (!userId) return '—';
+    const o = officials.find((of) => of.userId === userId);
+    return o ? o.name : `User #${userId}`;
+  };
+
+  const franchiseeNameById = (franchiseeId?: string) => {
+    if (!franchiseeId) return '—';
+    const owner = currentFirmOwners.find((o) => o.franchiseeId === franchiseeId);
+    return owner?.franchiseeName ?? `Franchisee #${franchiseeId}`;
   };
 
   const { currentAgreement, historyAgreements } = useMemo(() => {
@@ -120,6 +171,21 @@ export function SalonDetail() {
     const rest = agreements.filter((a) => a.id !== active?.id);
     return { currentAgreement: active, historyAgreements: rest };
   }, [agreements]);
+
+  /**
+   * SalonResponse (every salon GET/list/create/update endpoint) does not include
+   * currentRoyaltyPercentage — confirmed against backend source. The column exists on
+   * the entity but is only ever written internally when a royalty request resolves;
+   * nothing reads it back out via the Salon API. So this is derived here instead, from
+   * the most recently resolved APPROVED request in this salon's own royalty history —
+   * the salon's percentage only actually changes once both tiers approve.
+   */
+  const currentRoyaltyPercentage = useMemo(() => {
+    const approved = royaltyHistory.filter((r) => r.overallStatus === 'APPROVED');
+    if (approved.length === 0) return null;
+    const latest = approved.reduce((a, b) => (new Date(a.updatedAt) > new Date(b.updatedAt) ? a : b));
+    return latest.newPercentage;
+  }, [royaltyHistory]);
 
   const handleTransfer = async () => {
     if (!salon || !newFirmId || !transferReason.trim()) return;
@@ -136,6 +202,35 @@ export function SalonDetail() {
       showToast('error', err instanceof ApiError ? err.message : 'Failed to transfer salon.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRequestRoyaltyChange = async () => {
+    if (!salon || !royaltyFranchiseeId || !royaltyForm.newPercentage.trim() || !royaltyForm.reason.trim()) return;
+    setRoyaltyBusy(true);
+    try {
+      await createRoyaltyRequest({
+        salonId: salon.id,
+        franchiseeId: royaltyFranchiseeId,
+        newPercentage: Number(royaltyForm.newPercentage),
+        reason: royaltyForm.reason,
+        instructedBy: royaltyForm.instructedBy.trim() || undefined,
+      });
+      showToast('success', 'Royalty change request submitted for approval.');
+      setRoyaltyModal(false);
+      setRoyaltyForm({ newPercentage: '', reason: '', instructedBy: '' });
+      loadRoyaltyHistory();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        showToast(
+          'error',
+          "You aren't the assigned Relationship/Cluster Manager for this salon, so you can't submit a royalty change request here.",
+        );
+      } else {
+        showToast('error', err instanceof ApiError ? err.message : 'Failed to submit royalty change request.');
+      }
+    } finally {
+      setRoyaltyBusy(false);
     }
   };
 
@@ -292,6 +387,27 @@ export function SalonDetail() {
         </div>
       </Card>
 
+      {/* Current Royalty */}
+      <Card className="p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600 shrink-0">
+              <Percent className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-ink-secondary font-medium">Current Royalty</p>
+              <p className="text-lg font-semibold text-ink">
+                {royaltyHistoryLoading ? '…' : currentRoyaltyPercentage != null ? `${currentRoyaltyPercentage}%` : 'Not set'}
+              </p>
+            </div>
+          </div>
+          <Button variant="secondary" onClick={() => setRoyaltyModal(true)}>
+            <Percent className="h-4 w-4" />
+            Request Royalty Change
+          </Button>
+        </div>
+      </Card>
+
       {/* Details */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="p-6">
@@ -408,6 +524,56 @@ export function SalonDetail() {
         )}
       </Card>
 
+      {/* Royalty History */}
+      <Card className="p-6">
+        <h2 className="text-base font-semibold text-ink mb-4">Royalty History</h2>
+        {royaltyHistoryLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : royaltyHistory.length === 0 ? (
+          <EmptyState
+            title="No royalty change requests yet"
+            message="Requests submitted for this salon will appear here, including rejected ones."
+            icon={<Percent className="h-8 w-8" />}
+          />
+        ) : (
+          <div className="divide-y divide-brand-50 border-t border-brand-50">
+            {royaltyHistory.map((r) => (
+              <div key={r.id} className="py-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-ink font-medium">
+                      {r.currentPercentage != null ? `${r.currentPercentage}%` : 'Not set'} → {r.newPercentage}%
+                    </span>
+                    <Badge kind={royaltyStatusBadgeKind(r.overallStatus)} label={r.overallStatus} />
+                  </div>
+                  <span className="text-xs text-ink-secondary">{formatDate(r.createdAt)}</span>
+                </div>
+                <div className="text-xs text-ink-secondary flex flex-wrap gap-x-2">
+                  <span>State Head: <Badge kind={royaltyStatusBadgeKind(r.stateHeadDecision)} label={r.stateHeadDecision} size="sm" /></span>
+                  <span>Admin: <Badge kind={royaltyStatusBadgeKind(r.adminDecision)} label={r.adminDecision} size="sm" /></span>
+                </div>
+                <p className="text-sm text-ink">
+                  <span className="text-ink-secondary">Franchisee:</span> {franchiseeNameById(r.franchiseeId)}
+                  <span className="text-ink-secondary"> · Reason:</span> {r.reason || '—'}
+                  {r.instructedBy && <span className="text-ink-secondary"> · Instructed by: {r.instructedBy}</span>}
+                </p>
+                <p className="text-xs text-ink-secondary">Requested by {userName(r.requestedBy)}</p>
+                {r.stateHeadReason && (
+                  <p className="text-xs text-ink-secondary">
+                    State Head decision by {userName(r.stateHeadDecidedBy)}: {r.stateHeadReason}
+                  </p>
+                )}
+                {r.adminReason && (
+                  <p className="text-xs text-ink-secondary">
+                    Admin decision by {userName(r.adminDecidedBy)}: {r.adminReason}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
       {/* Transfer modal */}
       <Modal
         open={transferModal}
@@ -440,6 +606,70 @@ export function SalonDetail() {
             value={transferReason}
             onChange={(e) => setTransferReason(e.target.value)}
             error={!transferReason.trim() && transferModal ? 'A reason is required.' : undefined}
+          />
+        </div>
+      </Modal>
+
+      {/* Royalty change request modal */}
+      <Modal
+        open={royaltyModal}
+        onClose={() => {
+          setRoyaltyModal(false);
+          setRoyaltyForm({ newPercentage: '', reason: '', instructedBy: '' });
+        }}
+        title="Request Royalty Change"
+        description={`Submit a royalty change request for ${salon.salonName}. This goes to the State Head and Admin for approval.`}
+        primaryLabel={royaltyBusy ? 'Submitting...' : 'Submit Request'}
+        primaryDisabled={!royaltyFranchiseeId || !royaltyForm.newPercentage.trim() || !royaltyForm.reason.trim() || royaltyBusy}
+        onPrimary={handleRequestRoyaltyChange}
+      >
+        <div className="space-y-4">
+          {currentFirmOwners.length > 1 ? (
+            <Select label="Franchisee" value={royaltyFranchiseeId} onChange={(e) => setRoyaltyFranchiseeId(e.target.value)}>
+              {currentFirmOwners.map((o) => (
+                <option key={o.franchiseeId} value={o.franchiseeId}>
+                  {o.franchiseeName ?? `Franchisee #${o.franchiseeId}`} {o.isPrimary ? '(Primary)' : ''}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Input
+              label="Franchisee"
+              value={currentFirmOwners[0]?.franchiseeName ?? (royaltyFranchiseeId ? `Franchisee #${royaltyFranchiseeId}` : '—')}
+              disabled
+              className="opacity-60"
+            />
+          )}
+          <Input label="Salon" value={salon.salonName} disabled className="opacity-60" />
+          <Input
+            label="Current %"
+            value={currentRoyaltyPercentage != null ? `${currentRoyaltyPercentage}%` : 'Not set'}
+            disabled
+            className="opacity-60"
+          />
+          <Input
+            label="New %"
+            type="number"
+            min={0}
+            max={100}
+            step="0.01"
+            placeholder="E.g. 8.5"
+            value={royaltyForm.newPercentage}
+            onChange={(e) => setRoyaltyForm({ ...royaltyForm, newPercentage: e.target.value })}
+          />
+          <Textarea
+            label="Why"
+            placeholder="Reason for this royalty change..."
+            rows={3}
+            value={royaltyForm.reason}
+            onChange={(e) => setRoyaltyForm({ ...royaltyForm, reason: e.target.value })}
+            error={!royaltyForm.reason.trim() && royaltyModal ? 'A reason is required.' : undefined}
+          />
+          <Input
+            label="Instructed by (optional)"
+            placeholder="E.g. Regional Head name"
+            value={royaltyForm.instructedBy}
+            onChange={(e) => setRoyaltyForm({ ...royaltyForm, instructedBy: e.target.value })}
           />
         </div>
       </Modal>

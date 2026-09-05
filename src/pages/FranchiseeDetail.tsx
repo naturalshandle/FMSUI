@@ -11,19 +11,28 @@ import {
   ChevronRight,
   Calendar,
   BadgeCheck,
+  Plus,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { getFranchisee, verifySection as apiVerifySection, rejectSection as apiRejectSection, ApiError } from '@/lib/api';
+import {
+  createRelation as apiCreateRelation,
+  updateRelation as apiUpdateRelation,
+  deleteRelation as apiDeleteRelation,
+  type RelationInput,
+} from '@/lib/relationsApi';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { Textarea } from '@/components/ui/Input';
+import { Input, Select, Textarea } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { sectionLabels } from '@/utils/stats';
-import type { Franchisee, SectionName } from '@/types';
+import type { Franchisee, Relation, SectionName } from '@/types';
 
 type Tab = SectionName;
 
@@ -86,6 +95,69 @@ export function FranchiseeDetail() {
   const [rejectReason, setRejectReason] = useState('');
   const [verifyModal, setVerifyModal] = useState<{ section: SectionName } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [relationModal, setRelationModal] = useState<{ relation: Relation | null } | null>(null);
+  const [relationForm, setRelationForm] = useState<RelationInput>({ name: '', relationType: 'SPOUSE' });
+  const [relationError, setRelationError] = useState<string | null>(null);
+  const [relationBusy, setRelationBusy] = useState(false);
+  const [deleteRelationTarget, setDeleteRelationTarget] = useState<Relation | null>(null);
+
+  const openAddRelation = () => {
+    setRelationForm({ name: '', relationType: 'SPOUSE' });
+    setRelationError(null);
+    setRelationModal({ relation: null });
+  };
+
+  const openEditRelation = (rel: Relation) => {
+    setRelationForm({
+      name: rel.name,
+      relationType: rel.relationType,
+      dateOfBirth: rel.dateOfBirth,
+      anniversaryDate: rel.anniversaryDate,
+      phone: rel.phone,
+    });
+    setRelationError(null);
+    setRelationModal({ relation: rel });
+  };
+
+  const handleSaveRelation = async () => {
+    if (!franchisee) return;
+    if (!relationForm.name.trim()) {
+      setRelationError('Name is required.');
+      return;
+    }
+    setRelationBusy(true);
+    try {
+      if (relationModal?.relation) {
+        await apiUpdateRelation(franchisee.id, relationModal.relation.id, relationForm);
+        showToast('success', 'Relation updated.');
+      } else {
+        await apiCreateRelation(franchisee.id, relationForm);
+        showToast('success', 'Relation added.');
+      }
+      setRelationModal(null);
+      load();
+    } catch (err) {
+      setRelationError(err instanceof ApiError ? err.message : 'Failed to save relation.');
+    } finally {
+      setRelationBusy(false);
+    }
+  };
+
+  const handleDeleteRelation = async () => {
+    if (!franchisee || !deleteRelationTarget) return;
+    setRelationBusy(true);
+    try {
+      await apiDeleteRelation(franchisee.id, deleteRelationTarget.id);
+      showToast('success', 'Relation removed.');
+      setDeleteRelationTarget(null);
+      load();
+    } catch (err) {
+      showToast('error', err instanceof ApiError ? err.message : 'Failed to remove relation.');
+    } finally {
+      setRelationBusy(false);
+    }
+  };
 
   const currentSection = useMemo(
     () => franchisee?.sections.find((s) => s.section === activeTab),
@@ -186,7 +258,7 @@ export function FranchiseeDetail() {
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-xl font-bold text-ink">Franchisee #{franchisee.id}</h1>
-                <Badge kind={franchisee.overallStatus === 'ONBOARDED' ? 'ONBOARDED' : 'INCOMPLETE'} size="md" />
+                <Badge kind={franchisee.overallStatus} size="md" />
               </div>
               <p className="text-sm text-ink-secondary mt-1">
                 {franchisee.franchiseeType === 'INDIVIDUAL' ? 'Individual Franchisee' : 'Company Franchisee'} ·
@@ -283,14 +355,7 @@ export function FranchiseeDetail() {
             <InfoRow label="PAN" value={franchisee.pan || '—'} />
             <InfoRow label="Date of Birth" value={formatDate(franchisee.dateOfBirth)} />
             <InfoRow label="Company Registration No." value={franchisee.companyRegistrationNumber || '—'} />
-            <InfoRow
-              label="Address"
-              value={
-                [franchisee.addressLine1, franchisee.addressLine2, franchisee.city, franchisee.state, franchisee.pincode]
-                  .filter(Boolean)
-                  .join(', ') || '—'
-              }
-            />
+            <InfoRow label="Address" value={franchisee.address || '—'} />
             <InfoRow icon={Calendar} label="Created At" value={formatDate(franchisee.createdAt)} />
           </div>
         )}
@@ -298,6 +363,12 @@ export function FranchiseeDetail() {
         {/* RELATIONS */}
         {activeTab === 'RELATIONS' && (
           <div>
+            <div className="flex justify-end mb-4">
+              <Button size="sm" variant="secondary" onClick={openAddRelation}>
+                <Plus className="h-4 w-4" />
+                Add Relation
+              </Button>
+            </div>
             {franchisee.relations.length === 0 ? (
               <EmptyState
                 title="No relations added"
@@ -314,11 +385,25 @@ export function FranchiseeDetail() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-ink">{rel.name}</p>
                       <p className="text-xs text-ink-secondary mt-0.5">
-                        {relationTypeLabels[rel.relationType]}
+                        {relationTypeLabels[rel.relationType] ?? rel.relationType}
                         {rel.dateOfBirth && ` · DOB: ${formatDate(rel.dateOfBirth)}`}
                         {rel.anniversaryDate && ` · Anniversary: ${formatDate(rel.anniversaryDate)}`}
                       </p>
                     </div>
+                    <button
+                      onClick={() => openEditRelation(rel)}
+                      className="rounded-lg p-2 text-ink-secondary hover:bg-white hover:text-brand-700 transition-colors"
+                      aria-label="Edit relation"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteRelationTarget(rel)}
+                      className="rounded-lg p-2 text-ink-secondary hover:bg-white hover:text-status-rejected transition-colors"
+                      aria-label="Remove relation"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -435,6 +520,74 @@ export function FranchiseeDetail() {
           onChange={(e) => setRejectReason(e.target.value)}
           error={!rejectReason.trim() && rejectModal ? 'A reason is required to reject a section.' : undefined}
         />
+      </Modal>
+
+      {/* Add / edit relation modal */}
+      <Modal
+        open={!!relationModal}
+        onClose={() => setRelationModal(null)}
+        title={relationModal?.relation ? 'Edit relation' : 'Add relation'}
+        primaryLabel={relationModal?.relation ? 'Save changes' : 'Add relation'}
+        primaryDisabled={relationBusy}
+        onPrimary={handleSaveRelation}
+      >
+        <div className="space-y-4">
+          {relationError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-status-rejected">
+              {relationError}
+            </div>
+          )}
+          <Input
+            label="Name"
+            value={relationForm.name}
+            onChange={(e) => setRelationForm((f) => ({ ...f, name: e.target.value }))}
+          />
+          <Select
+            label="Relation type"
+            value={relationForm.relationType}
+            onChange={(e) =>
+              setRelationForm((f) => ({ ...f, relationType: e.target.value }))
+            }
+          >
+            {Object.entries(relationTypeLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+          <Input
+            label="Date of birth"
+            type="date"
+            value={relationForm.dateOfBirth ?? ''}
+            onChange={(e) => setRelationForm((f) => ({ ...f, dateOfBirth: e.target.value || undefined }))}
+          />
+          <Input
+            label="Anniversary date"
+            type="date"
+            value={relationForm.anniversaryDate ?? ''}
+            onChange={(e) => setRelationForm((f) => ({ ...f, anniversaryDate: e.target.value || undefined }))}
+          />
+          <Input
+            label="Phone (+91XXXXXXXXXX)"
+            placeholder="+919876543210"
+            value={relationForm.phone ?? ''}
+            onChange={(e) => setRelationForm((f) => ({ ...f, phone: e.target.value || undefined }))}
+          />
+        </div>
+      </Modal>
+
+      {/* Delete relation confirm */}
+      <Modal
+        open={!!deleteRelationTarget}
+        onClose={() => setDeleteRelationTarget(null)}
+        title="Remove relation?"
+        description={deleteRelationTarget ? `This will remove ${deleteRelationTarget.name} from the franchisee's relations.` : undefined}
+        primaryLabel="Remove"
+        primaryVariant="danger"
+        primaryDisabled={relationBusy}
+        onPrimary={handleDeleteRelation}
+      >
+        <div />
       </Modal>
     </div>
   );

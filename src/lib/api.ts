@@ -171,6 +171,24 @@ export async function logout(): Promise<void> {
   }
 }
 
+/** POST /auth/forgot-password — always 200 with a generic message; never reveal whether the email exists. */
+export async function forgotPassword(email: string): Promise<void> {
+  await request('/auth/forgot-password', { method: 'POST', body: { email }, auth: false });
+}
+
+/** POST /auth/reset-password — completes a reset started via forgotPassword's emailed link. */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  await request('/auth/reset-password', { method: 'POST', body: { token, password }, auth: false });
+}
+
+/**
+ * POST /auth/activate — sets the initial password for an account created via
+ * POST /admin/users or POST /admin/franchisees. The activation token arrives out-of-band (email).
+ */
+export async function activateAccount(token: string, password: string): Promise<void> {
+  await request('/auth/activate', { method: 'POST', body: { token, password }, auth: false });
+}
+
 // ---------------------------------------------------------------------------
 // MFA
 // ---------------------------------------------------------------------------
@@ -298,18 +316,14 @@ interface RawFirm {
   salons?: RawSalon[];
 }
 
+/** Confirmed live against GET /api/v1/franchisees/{id} — pan and address are flat scalar fields. */
 interface RawFranchisee {
   id: number;
   franchiseeType: Franchisee['franchiseeType'];
-  panNumber?: string;
+  pan?: string;
   dateOfBirth?: string;
   companyRegistrationNumber?: string;
-  addressLine1?: string;
-  addressLine2?: string;
-  city?: string;
-  state?: string;
-  pincode?: string;
-  country?: string;
+  address?: string;
   relationsConsentGiven: boolean;
   overallStatus: Franchisee['overallStatus'];
   createdAt: string;
@@ -412,15 +426,10 @@ function adaptFranchisee(f: RawFranchisee): Franchisee {
   return {
     id: String(f.id),
     franchiseeType: f.franchiseeType,
-    pan: f.panNumber ?? '',
+    pan: f.pan ?? '',
     dateOfBirth: f.dateOfBirth,
     companyRegistrationNumber: f.companyRegistrationNumber,
-    addressLine1: f.addressLine1,
-    addressLine2: f.addressLine2,
-    city: f.city,
-    state: f.state,
-    pincode: f.pincode,
-    country: f.country,
+    address: f.address,
     relationsConsentGiven: f.relationsConsentGiven,
     overallStatus: f.overallStatus,
     createdAt: f.createdAt,
@@ -430,8 +439,15 @@ function adaptFranchisee(f: RawFranchisee): Franchisee {
   };
 }
 
+/**
+ * GET /api/v1/admin/franchisees/:id — admin-scoped detail fetch, unrestricted by
+ * caller-ownership (unlike GET /franchisees/:id, which is the self-service endpoint
+ * and 403s unless franchisee.userId matches the caller). This app's /franchisee/:id
+ * route is only ever reached from admin surfaces (Review Queue, Firm owner links,
+ * post-create redirect), so it must always use the admin endpoint.
+ */
 export async function getFranchisee(id: string): Promise<Franchisee> {
-  const data = await request<RawFranchisee>(`/franchisees/${id}`);
+  const data = await request<RawFranchisee>(`/admin/franchisees/${id}`);
   return adaptFranchisee(data);
 }
 
@@ -496,10 +512,7 @@ export async function listFranchiseesAdmin(params: FranchiseeDirectoryParams = {
     id: String(r.id ?? r.franchiseeId ?? ''),
     fullName: (r.fullName as string) ?? (r.name as string) ?? undefined,
     franchiseeType: r.franchiseeType as FranchiseeSummary['franchiseeType'],
-    pan: (r.pan as string) ?? (r.panNumber as string) ?? undefined,
-    contact: r.contact as string | undefined,
-    email: r.email as string | undefined,
-    status: (r.status as string) ?? (r.overallStatus as string) ?? undefined,
+    overallStatus: r.overallStatus as FranchiseeSummary['overallStatus'],
     source: r.source as string | undefined,
     firmCount: (r.firmCount as number) ?? (Array.isArray(r.firms) ? (r.firms as unknown[]).length : undefined),
     salonCount: r.salonCount as number | undefined,

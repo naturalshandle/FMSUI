@@ -201,19 +201,19 @@ export function ReviewQueue() {
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <Avatar initials={getInitials(f.fullName || f.pan || f.id)} size="sm" />
+                          <Avatar initials={getInitials(f.fullName || f.id)} size="sm" />
                           <div>
                             <p className="text-sm font-medium text-ink group-hover:text-brand-700 transition-colors">
                               {f.fullName || `Franchisee #${f.id}`}
                             </p>
                             <p className="text-xs text-ink-secondary">
-                              {f.franchiseeType === 'INDIVIDUAL' ? 'Individual' : f.franchiseeType === 'COMPANY' ? 'Company' : '—'} · {f.pan || '—'}
+                              {f.franchiseeType === 'INDIVIDUAL' ? 'Individual' : f.franchiseeType === 'COMPANY' ? 'Company' : '—'}
                             </p>
                           </div>
                         </div>
                       </td>
                       <td className="px-3 py-4">
-                        {f.status ? <Badge kind={f.status as 'DRAFT' | 'SUBMITTED' | 'VERIFIED' | 'REJECTED'} /> : '—'}
+                        {f.overallStatus ? <Badge kind={f.overallStatus} /> : '—'}
                       </td>
                       <td className="px-3 py-4 text-sm text-ink-secondary">{f.source ?? '—'}</td>
                       <td className="px-3 py-4 text-sm text-ink-secondary">{f.firmCount ?? '—'}</td>
@@ -239,14 +239,14 @@ export function ReviewQueue() {
                   className="p-4 cursor-pointer hover:bg-brand-50/50 transition-colors active:bg-brand-50"
                 >
                   <div className="flex items-center gap-3 mb-2">
-                    <Avatar initials={getInitials(f.fullName || f.pan || f.id)} size="sm" />
+                    <Avatar initials={getInitials(f.fullName || f.id)} size="sm" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-ink truncate">{f.fullName || `Franchisee #${f.id}`}</p>
                       <p className="text-xs text-ink-secondary truncate">{formatDate(f.createdAt)}</p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-ink-secondary/30" />
                   </div>
-                  {f.status && <Badge kind={f.status as 'DRAFT' | 'SUBMITTED' | 'VERIFIED' | 'REJECTED'} />}
+                  {f.overallStatus && <Badge kind={f.overallStatus} />}
                 </div>
               ))}
             </div>

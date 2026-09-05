@@ -4,6 +4,9 @@ import { AppProvider, useApp } from '@/context/AppContext';
 import { ToastProvider } from '@/components/ui/Toast';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { LoginScreen } from '@/pages/LoginScreen';
+import { ForgotPasswordScreen } from '@/pages/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '@/pages/ResetPasswordScreen';
+import { ActivateAccountScreen } from '@/pages/ActivateAccountScreen';
 import { MfaVerifyScreen } from '@/pages/MfaVerifyScreen';
 import { MfaSetupScreen } from '@/pages/MfaSetupScreen';
 import { HomeDashboard } from '@/pages/HomeDashboard';
@@ -16,6 +19,8 @@ import { SalonManagement } from '@/pages/SalonManagement';
 import { AdminUserManagement } from '@/pages/AdminUserManagement';
 import { AddFranchiseeWizard } from '@/pages/AddFranchiseeWizard';
 import { OfficialsManagement } from '@/pages/OfficialsManagement';
+import { RoyaltyApprovals } from '@/pages/RoyaltyApprovals';
+import { MySalons } from '@/pages/MySalons';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { currentUser, authInitializing } = useApp();
@@ -38,6 +43,9 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<RedirectIfAuthed><LoginScreen /></RedirectIfAuthed>} />
+      <Route path="/forgot-password" element={<RedirectIfAuthed><ForgotPasswordScreen /></RedirectIfAuthed>} />
+      <Route path="/reset-password" element={<RedirectIfAuthed><ResetPasswordScreen /></RedirectIfAuthed>} />
+      <Route path="/activate" element={<RedirectIfAuthed><ActivateAccountScreen /></RedirectIfAuthed>} />
       <Route path="/mfa/verify" element={<MfaVerifyScreen />} />
       <Route path="/mfa/setup" element={<MfaSetupScreen />} />
       <Route path="/" element={<RequireAuth><HomeDashboard /></RequireAuth>} />
@@ -49,6 +57,9 @@ function AppRoutes() {
       <Route path="/salon/:id" element={<RequireAuth><SalonDetail /></RequireAuth>} />
       <Route path="/admin-users" element={<RequireAuth><AdminUserManagement /></RequireAuth>} />
       <Route path="/officials" element={<RequireAuth><OfficialsManagement /></RequireAuth>} />
+      <Route path="/royalty-approvals" element={<RequireAuth><RoyaltyApprovals /></RequireAuth>} />
+      <Route path="/my-salons" element={<RequireAuth><MySalons /></RequireAuth>} />
+      <Route path="/my-salons/:id" element={<RequireAuth><MySalons /></RequireAuth>} />
       <Route path="/admin/franchisees/new" element={<RequireAuth><AddFranchiseeWizard /></RequireAuth>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

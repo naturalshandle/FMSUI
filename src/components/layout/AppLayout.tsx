@@ -10,9 +10,14 @@ import {
   LogOut,
   Sparkles,
   ShieldCheck,
+  Percent,
+  MapPinned,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
+
+const ROYALTY_APPROVAL_ROLES = ['STATE_HEAD', 'SUPER_ADMIN', 'CORPORATE_ADMIN'];
+const OFFICIAL_ROLES = ['REGIONAL_MANAGER', 'CLUSTER_MANAGER', 'STATE_HEAD'];
 
 const navItems = [
   { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
@@ -20,7 +25,9 @@ const navItems = [
   { to: '/admin/franchisees/new', label: 'Add Franchisee', icon: UserPlus },
   { to: '/firms', label: 'Companies', icon: Building2 },
   { to: '/salons', label: 'Salon Management', icon: Scissors },
+  { to: '/my-salons', label: 'My Salons', icon: MapPinned, roles: OFFICIAL_ROLES },
   { to: '/officials', label: 'Officials', icon: ShieldCheck },
+  { to: '/royalty-approvals', label: 'Royalty Approvals', icon: Percent, roles: ROYALTY_APPROVAL_ROLES },
   { to: '/admin-users', label: 'Admin Users', icon: Users },
 ];
 
@@ -50,6 +57,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
     navigate('/login');
   };
 
+  const visibleNavItems = navItems.filter(
+    (item) => !item.roles || item.roles.some((r) => currentUser?.roles?.includes(r)),
+  );
+
   return (
     <div className="flex min-h-screen bg-surface-base">
       {/* Sidebar */}
@@ -65,7 +76,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -116,7 +127,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-brand-100 flex items-center justify-around px-2 py-2">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

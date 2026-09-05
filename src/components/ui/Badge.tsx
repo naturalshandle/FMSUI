@@ -1,13 +1,12 @@
 import type { SectionState } from '@/types';
 
-type BadgeKind = SectionState | 'ONBOARDED' | 'INCOMPLETE';
+type BadgeKind = SectionState | 'ONBOARDED';
 
 const badgeConfig: Record<BadgeKind, { label: string; classes: string; dot: string }> = {
   VERIFIED: { label: 'Verified', classes: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-status-verified' },
   SUBMITTED: { label: 'Submitted', classes: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-status-pending' },
   REJECTED: { label: 'Rejected', classes: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-status-rejected' },
   DRAFT: { label: 'Draft', classes: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-status-draft' },
-  INCOMPLETE: { label: 'Incomplete', classes: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-status-draft' },
   ONBOARDED: { label: 'Onboarded', classes: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-status-verified' },
 };
 

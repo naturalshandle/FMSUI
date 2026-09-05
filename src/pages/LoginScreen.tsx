@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Input } from '@/components/ui/Input';
@@ -99,6 +99,11 @@ export function LoginScreen() {
                 error={errors.password}
                 disabled={authLoading}
               />
+              <div className="mt-1.5 text-right">
+                <Link to="/forgot-password" className="text-xs font-medium text-brand-700 hover:text-brand-800">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
 
             <Button type="submit" size="lg" className="w-full" disabled={authLoading}>

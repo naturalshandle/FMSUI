@@ -210,3 +210,202 @@ Endpoints: `POST/GET /admin/salons/{salonId}/agreements`, `PATCH /admin/agreemen
 6. Click **Terminate** on the current agreement, provide a reason, confirm.
    - Expect: info toast, agreement status updates to reflect termination.
 7. Confirm no action lets you change Valid Till without going through Renew.
+
+## Royalty (`/salon/:id`, `/royalty-approvals`)
+
+> **Endpoint paths and response shape confirmed against FMSBE backend source directly**
+> (this module predates the Postman collection). `src/lib/royaltyApi.ts` maps the
+> response 1:1 — no defensive field-name fallbacks remain for the royalty-request
+> shape itself.
+>
+> **`Salon.currentRoyaltyPercentage` is not on the wire at all** — confirmed absent
+> from `SalonResponse` on every salon GET/list/create/update endpoint. The entity
+> column exists (`Salon.currentRoyaltyPercentage`, `current_royalty_percentage`) but
+> is only ever written internally by `RoyaltyChangeRequestService.resolve()` when both
+> tiers approve; nothing reads it back out via the Salon API. Rather than guess at a
+> field name that provably doesn't exist, the frontend derives "current royalty %" on
+> Salon Detail from the salon's own `/royalty-history`: the `newPercentage` of the most
+> recently resolved `APPROVED` entry (`currentRoyaltyPercentage` memo in
+> `SalonDetail.tsx`), "Not set" if there's no approved entry yet. This is correct by
+> construction — the salon's real percentage only ever changes when an entry there
+> resolves APPROVED — but ask backend to add the field to `SalonResponse` if a cheaper
+> single-field read is ever wanted instead of pulling full history for this display.
+>
+> Client-side display-name resolution (below) is also still needed, since the
+> royalty-request response is IDs-only.
+
+Endpoints: `POST /royalty-requests`, `GET /salons/{salonId}/royalty-history`,
+`GET /royalty-requests/pending` (**not** under `/admin/**` — it must also serve
+`STATE_HEAD` callers, who are blocked from `/admin/**`), `GET /royalty-requests/{id}`,
+`POST /royalty-requests/{id}/state-head-decision`, `POST /royalty-requests/{id}/admin-decision`.
+
+**Approval model:** each request carries two independent, non-blocking decision slots
+(`stateHeadDecision`, `adminDecision`) plus a derived `overallStatus`. Either tier
+rejecting closes the request as REJECTED immediately, regardless of the other tier's
+state. Only when both are APPROVED does `overallStatus` become APPROVED and the
+salon's actual `currentRoyaltyPercentage` update — the UI never shows the new % as
+live before that. Re-deciding an already-decided tier, or a request that's no longer
+PENDING overall, is a 409 (`isAlreadyClosedError` in `RoyaltyApprovals.tsx`).
+
+**Display names:** the response has no `salonName`/`franchiseeName`/`requestedByName` —
+IDs only. `SalonDetail.tsx` resolves franchisee names from the current firm's already-
+loaded owners and resolves user ids (`requestedBy`, `*DecidedBy`) against the Officials
+list (matching `Official.userId`), falling back to `User #<id>` for Admin users (who
+aren't Officials). `RoyaltyApprovals.tsx` does the same but must first resolve salon →
+firm per unique salon in the queue (`getSalon` then `getFirm`), since it spans multiple
+salons. Worth a manual check: this means Admins reviewing many different salons will
+see a burst of small requests on page load — fine for a page-sized queue (default 20),
+but flag to the backend if a `salonName`/`franchiseeName` projection would be cheaper
+than N+1 client-side lookups at higher volumes.
+
+### Journey 1 — RM/CM submits a royalty change request (happy path)
+
+1. Open a salon as the assigned RM/CM. Confirm **Current Royalty** shows either a
+   percentage or "Not set" (never "0%" or blank) near the top of the page.
+2. Click **Request Royalty Change**.
+   - If the owning firm has exactly one owner, confirm **Franchisee** is shown
+     read-only. If it has multiple owners, confirm a dropdown lists all current owners.
+   - Confirm **Salon** and **Current %** are read-only and cannot be edited.
+3. Enter a **New %** and a **Why** (reason); optionally fill **Instructed by**. Submit.
+   - Expect: success toast, modal closes, the new request appears at the top of
+     **Royalty History** with status "Pending" (State Head: Pending · Admin: Pending).
+
+### Journey 2 — RM/CM submits as the wrong official (403)
+
+1. As a user who is **not** the assigned RM/CM for a given salon, open that salon and
+   submit a royalty change request.
+   - Expect: a clear error explaining the caller isn't the assigned Relationship/Cluster
+     Manager for this salon — not a generic "request failed" message.
+
+### Journey 3 — State Head approves
+
+1. Log in as a State Head with a pending royalty request assigned to them. Confirm
+   **Royalty Approvals** appears in the nav (and does *not* appear for a Regional
+   Manager / Cluster Manager without that role).
+2. Open **Royalty Approvals** — confirm the pending request shows salon, franchisee,
+   current → new %, reason, instructed by, requested by, and date.
+3. Click **Approve**.
+   - Expect: success toast, the item drops out of the pending list, and (checking back
+     on the salon's Royalty History) "State Head: Approved" now shows while "Admin"
+     remains Pending and overall status is still Pending.
+
+### Journey 4 — State Head rejects
+
+1. From **Royalty Approvals**, click **Reject** on a pending request.
+   - Expect: a reason is required to submit (matching the Agreement-termination /
+     Firm-owner-removal reason-modal pattern) — the Reject button stays disabled until
+     text is entered.
+2. Submit with a reason.
+   - Expect: info toast, item drops out of the pending list, and Royalty History shows
+     overall status "Rejected" with the State Head's reason visible.
+
+### Journey 5 — Admin approves / rejects
+
+1. Repeat Journeys 3–4 logged in as a `SUPER_ADMIN` or `CORPORATE_ADMIN` user instead
+   of a State Head.
+   - Expect: same UI and behavior, but the app calls the admin-decision endpoint
+     instead of the state-head-decision endpoint (verify via network tab).
+
+### Journey 6 — Independent, non-blocking decisions + already-closed race condition
+
+1. Confirm a State Head can act on a request regardless of whether the Admin tier has
+   already decided (and vice versa) — neither UI hides or disables its own action
+   waiting on the other tier.
+2. Get a request pending on both tiers. Have one approve/reject it, then — before
+   refreshing the other party's queue — attempt to approve/reject the same request
+   from the other party's still-stale queue (or retry the same decision twice quickly).
+   - Expect: HTTP 409 surfaces as "This request was already resolved by the other
+     approver," not a generic failure.
+3. Reject at either tier while the other tier is still Pending.
+   - Expect: `overallStatus` immediately becomes REJECTED; the salon's Current Royalty
+     is unchanged; the other tier's decision, if it comes in later, doesn't reopen or
+     re-close the request.
+4. Approve at both tiers (in either order).
+   - Expect: only after *both* are APPROVED does `overallStatus` flip to APPROVED and
+     the salon's **Current Royalty** value on Salon Detail actually update to the new
+     percentage — confirm it does NOT show the new % as live at any point before that.
+
+### Journey 7 — History shows a mix of resolved requests, with resolved names
+
+1. On a salon with several past royalty requests in different end states (approved,
+   rejected, still pending), confirm **Royalty History** lists all of them, newest
+   first, and does **not** hide rejected ones.
+2. Confirm each history row shows old % → new %, overall status pill, both individual
+   decision states, the franchisee's resolved name (not just an id), requested-by
+   resolved to a name where the requester is a known Official, and — for resolved
+   requests — both decision reasons with the deciding user's resolved name.
+
+### Journey 8 — Current Royalty derived from history, not SalonResponse
+
+1. On a salon with **no** approved royalty request yet, confirm **Current Royalty**
+   and the request modal's read-only **Current %** both show "Not set".
+2. Get one request through to `overallStatus === 'APPROVED'` (both tiers approve).
+   Reload Salon Detail.
+   - Expect: **Current Royalty** now shows that request's `newPercentage`, sourced
+     from Royalty History, not from any field on the Salon record itself.
+3. Submit and approve a second, different percentage afterward.
+   - Expect: **Current Royalty** updates to the newer approved value (most recently
+     resolved wins, not just "any approved entry").
+
+### Known gaps to verify / flag back to backend
+
+- Consider asking backend to add `currentRoyaltyPercentage` to `SalonResponse`
+  (the entity field already exists — see the note above) if a single-field read ever
+  matters more than deriving it from `/royalty-history` on every Salon Detail load.
+- Display-name resolution is entirely client-side (see above) since the response is
+  IDs-only — an Admin user's name will always show as `User #<id>` (Admins aren't in
+  the Officials list); confirm that's an acceptable gap or ask backend for a
+  name-inclusive projection if it's not.
+- `RoyaltyApprovals.tsx`'s per-salon `getSalon`→`getFirm` lookups are N+1 against the
+  pending-queue page size — fine at a page size of 20, worth flagging if that page size
+  grows materially.
+
+## Franchisee Detail — PAN / Address field-name fix (`/franchisee/:id`)
+
+> Confirmed live against `GET /api/v1/franchisees/{id}`: the response field is `pan`
+> (the adapter was reading a nonexistent `panNumber`) and `address` is a single flat
+> string (the adapter was reading nonexistent `addressLine1`/`addressLine2`/`city`/
+> `state`/`pincode`). Fixed in `adaptFranchisee` (`src/lib/api.ts`), the `Franchisee`
+> type (`src/types/index.ts`), and the Address `InfoRow` in `FranchiseeDetail.tsx`.
+> There is no full Aadhaar on the wire, only `aadhaarLast4` — not currently displayed
+> anywhere; don't add a full-Aadhaar field if asked to show it later, only the last 4.
+
+1. Open a franchisee record known to have both PAN and address saved.
+   - Expect: the **PAN** row shows the actual PAN (previously always showed "—" or
+     blank because the adapter read the wrong key), and **Address** shows the single
+     saved address string.
+2. Open a franchisee record with no PAN/address saved.
+   - Expect: both rows show "—", not an empty string or "undefined".
+
+## My Salons (`/my-salons`, `/my-salons/:id`) — RM / CM / State Head
+
+> New endpoints, confirmed live: `GET /api/v1/officials/me/salons` and
+> `GET /api/v1/officials/me/salons/{salonId}`. Response is a **deliberately different,
+> smaller, owner-redacted shape** (`SalonForOfficial` in `src/types/index.ts`) than the
+> `Salon` type used by `/admin/salons/*` and `/salons/*` — nested `firm`/`owners`
+> instead of raw `*HeadId` fields, and `owners[]` carries only `fullName`/`isPrimary`.
+> **No PAN, Aadhaar, DOB, address, or contact for the owner exists on this endpoint by
+> design** — don't add those fields to `SalonForOfficial` or try to backfill them from
+> another endpoint; that's a product decision to raise with backend, not a frontend fix.
+
+Nav item **My Salons** is visible only to `REGIONAL_MANAGER`, `CLUSTER_MANAGER`,
+`STATE_HEAD` roles (same role-filtering mechanism as Royalty Approvals in
+`AppLayout.tsx`).
+
+1. Log in as an RM/CM/State Head who is linked to an `Official` record with at least
+   one assigned salon. Confirm **My Salons** appears in the nav (and does not appear
+   for a plain Admin without one of those three roles).
+2. Open **My Salons** — confirm it lists only salons assigned to this user (matched on
+   their own `officialType`'s head-id field), each showing salon name, firm, district/
+   state, current royalty %, and operational status.
+3. Click into one salon — confirm the detail view shows salon details plus firm name
+   and owner names (with a Primary tag), and confirms **no** PAN/Aadhaar/DOB/address/
+   contact is rendered anywhere from the owners list.
+4. Log in as a user with **no** Official record at all (e.g. a plain Admin who somehow
+   has this nav item, or hit the endpoint directly).
+   - Expect: an empty "No assigned salons" state, not an error — the backend returns
+     `[]`, not a failure, for a caller with no Official link.
+5. As an official assigned to at least one salon, manually navigate to
+   `/my-salons/{someOtherSalonId}` for a salon you're confirmed NOT assigned to.
+   - Expect: a clear "Not your assigned salon" state (403), not a crash or a silent
+     wrong-salon render.

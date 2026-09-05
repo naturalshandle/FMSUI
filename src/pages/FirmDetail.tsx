@@ -321,7 +321,7 @@ export function FirmDetail() {
             <option value="">Select a franchisee...</option>
             {availableCandidates.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.fullName ?? `Franchisee #${f.id}`} ({f.pan || 'no PAN'})
+                {f.fullName ?? `Franchisee #${f.id}`}
               </option>
             ))}
           </Select>
