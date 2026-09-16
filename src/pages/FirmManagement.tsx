@@ -1,48 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ChevronRight, Search } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Input, Select } from '@/components/ui/Input';
+import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonTable } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { listFirmsAdmin } from '@/lib/firmsApi';
-import { ApiError } from '@/lib/api';
+import { usePagedList } from '@/lib/pagination';
+import { searchFirms } from '@/lib/firmsApi';
 import type { CompanyType, Firm } from '@/types';
 
-const companyTypeLabels: Record<CompanyType, string> = {
+const companyTypeLabels: Record<string, string> = {
   PROPRIETORSHIP: 'Proprietorship',
   PARTNERSHIP: 'Partnership',
   PRIVATE_LIMITED: 'Private Limited',
   LLP: 'LLP',
 };
 
+const knownCompanyTypes = Object.keys(companyTypeLabels) as CompanyType[];
+
 export function FirmManagement() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [companyType, setCompanyType] = useState('');
-  const [firms, setFirms] = useState<Firm[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    listFirmsAdmin({ companyType: companyType || undefined, search: search.trim() || undefined, size: 100 })
-      .then((page) => {
-        if (!cancelled) setFirms(page.content);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof ApiError ? err.message : 'Failed to load companies.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [search, companyType]);
+  const {
+    content: firms,
+    page,
+    setPage,
+    totalElements,
+    totalPages,
+    loading,
+    error,
+  } = usePagedList(
+    (p, size) => searchFirms({ companyType: companyType || undefined, search: search.trim() || undefined, page: p, size }),
+    [search, companyType],
+  );
 
   const primaryOwnerLabel = (firm: Firm) => {
     const primary = firm.owners.find((o) => o.isPrimary) ?? firm.owners[0];
@@ -71,9 +65,9 @@ export function FirmManagement() {
         </div>
         <Select value={companyType} onChange={(e) => setCompanyType(e.target.value)} className="w-full sm:w-56">
           <option value="">All company types</option>
-          {Object.entries(companyTypeLabels).map(([value, label]) => (
+          {knownCompanyTypes.map((value) => (
             <option key={value} value={value}>
-              {label}
+              {companyTypeLabels[value]}
             </option>
           ))}
         </Select>
@@ -86,8 +80,12 @@ export function FirmManagement() {
           <EmptyState title="Couldn't load companies" message={error} icon={<Building2 className="h-8 w-8" />} />
         ) : firms.length === 0 ? (
           <EmptyState
-            title="No companies found"
-            message="No firms match your search. Try a different query."
+            title={search.trim() || companyType ? 'No companies found' : 'No firms yet'}
+            message={
+              search.trim() || companyType
+                ? 'No firms match your search. Try a different query.'
+                : 'Firms are created via the Franchise Creation wizard.'
+            }
             icon={<Building2 className="h-8 w-8" />}
           />
         ) : (
@@ -110,9 +108,6 @@ export function FirmManagement() {
                     </th>
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
                       Owners
-                    </th>
-                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
-                      Salons
                     </th>
                     <th className="px-3 py-3" />
                   </tr>
@@ -140,7 +135,6 @@ export function FirmManagement() {
                       <td className="px-3 py-4 text-sm text-ink-secondary font-mono">{firm.gstNumber || '—'}</td>
                       <td className="px-3 py-4 text-sm text-ink">{primaryOwnerLabel(firm)}</td>
                       <td className="px-3 py-4 text-sm text-ink-secondary">{firm.owners.length}</td>
-                      <td className="px-3 py-4 text-sm text-ink-secondary">{firm.salons.length}</td>
                       <td className="px-3 py-4">
                         <ChevronRight className="h-4 w-4 text-ink-secondary/30 group-hover:text-brand-600 transition-colors" />
                       </td>
@@ -173,8 +167,6 @@ export function FirmManagement() {
                     <span className="font-mono">{firm.gstNumber || '—'}</span>
                     <span>·</span>
                     <span>{firm.owners.length} owner(s)</span>
-                    <span>·</span>
-                    <span>{firm.salons.length} salon(s)</span>
                   </div>
                 </div>
               ))}
@@ -182,6 +174,10 @@ export function FirmManagement() {
           </>
         )}
       </Card>
+
+      {firms.length > 0 && (
+        <Pagination page={page} totalPages={totalPages} totalElements={totalElements} onPageChange={setPage} itemLabel="firm" />
+      )}
     </div>
   );
 }

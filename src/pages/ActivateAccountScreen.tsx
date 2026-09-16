@@ -9,7 +9,9 @@ export function ActivateAccountScreen() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') ?? '';
+  const emailFromLink = searchParams.get('email') ?? '';
 
+  const [email, setEmail] = useState(emailFromLink);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errors, setErrors] = useState<{ password?: string; confirmPassword?: string }>({});
@@ -33,7 +35,7 @@ export function ActivateAccountScreen() {
     setApiError(null);
     setLoading(true);
     try {
-      await activateAccount(token, password);
+      await activateAccount(token, email.trim(), password);
       setDone(true);
     } catch (err) {
       setApiError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
@@ -79,6 +81,15 @@ export function ActivateAccountScreen() {
                   This link is missing an activation token. Open it from your invitation email.
                 </div>
               )}
+
+              <Input
+                label="Email"
+                type="email"
+                placeholder="you@naturals.in"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+              />
 
               <Input
                 label="Password"

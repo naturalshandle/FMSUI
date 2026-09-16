@@ -11,33 +11,23 @@ import {
   Sparkles,
   ShieldCheck,
   Percent,
-  MapPinned,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
+import { ADMIN_ROLES, roleLabels } from '@/lib/roles';
 
-const ROYALTY_APPROVAL_ROLES = ['STATE_HEAD', 'SUPER_ADMIN', 'CORPORATE_ADMIN'];
-const OFFICIAL_ROLES = ['REGIONAL_MANAGER', 'CLUSTER_MANAGER', 'STATE_HEAD'];
+const ROYALTY_APPROVAL_ROLES = ['STATE_HEAD', ...ADMIN_ROLES];
 
 const navItems = [
   { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
-  { to: '/review', label: 'Directory', icon: ClipboardCheck },
-  { to: '/admin/franchisees/new', label: 'Add Franchisee', icon: UserPlus },
+  { to: '/franchisees', label: 'Franchisees', icon: ClipboardCheck },
+  { to: '/franchise-creation', label: 'Add Franchisee', icon: UserPlus },
   { to: '/firms', label: 'Companies', icon: Building2 },
   { to: '/salons', label: 'Salon Management', icon: Scissors },
-  { to: '/my-salons', label: 'My Salons', icon: MapPinned, roles: OFFICIAL_ROLES },
   { to: '/officials', label: 'Officials', icon: ShieldCheck },
   { to: '/royalty-approvals', label: 'Royalty Approvals', icon: Percent, roles: ROYALTY_APPROVAL_ROLES },
-  { to: '/admin-users', label: 'Admin Users', icon: Users },
+  { to: '/admin-users', label: 'Admin Users', icon: Users, roles: ADMIN_ROLES },
 ];
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'Super Admin',
-  CORPORATE_ADMIN: 'Corporate Admin',
-  STATE_HEAD: 'State Head',
-  REGIONAL_MANAGER: 'Regional Manager',
-  CLUSTER_MANAGER: 'Cluster Manager',
-};
 
 function displayName(email?: string): string {
   return email ? email.split('@')[0] : '';

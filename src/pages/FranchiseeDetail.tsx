@@ -1,77 +1,46 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, User as UserIcon, Calendar, Pencil, ShieldAlert } from 'lucide-react';
 import {
-  ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  Building2,
-  Scissors,
-  Users as UsersIcon,
-  User as UserIcon,
-  ChevronRight,
-  Calendar,
-  BadgeCheck,
-  Plus,
-  Pencil,
-  Trash2,
-} from 'lucide-react';
-import { getFranchisee, verifySection as apiVerifySection, rejectSection as apiRejectSection, ApiError } from '@/lib/api';
-import {
-  createRelation as apiCreateRelation,
-  updateRelation as apiUpdateRelation,
-  deleteRelation as apiDeleteRelation,
-  type RelationInput,
-} from '@/lib/relationsApi';
+  getFranchisee,
+  updateFranchisee,
+  revealSensitiveInfo,
+  updateSensitiveInfo,
+  type UpdateFranchiseeInput,
+} from '@/lib/franchiseesApi';
+import { ApiError } from '@/lib/api';
+import { requestStepUp } from '@/lib/stepUp';
+import { isAdmin } from '@/lib/roles';
+import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
-import { Input, Select, Textarea } from '@/components/ui/Input';
+import { Input } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
-import { sectionLabels } from '@/utils/stats';
-import type { Franchisee, Relation, SectionName } from '@/types';
+import { SensitiveField } from '@/components/domain/SensitiveField';
+import { DocumentsPanel } from '@/components/domain/DocumentsPanel';
+import type { Franchisee } from '@/types';
 
-type Tab = SectionName;
-
-const tabs: { key: Tab; label: string; icon: typeof UserIcon }[] = [
-  { key: 'FRANCHISEE_INFO', label: 'Franchisee Info', icon: UserIcon },
-  { key: 'RELATIONS', label: 'Relations', icon: UsersIcon },
-  { key: 'FIRMS', label: 'Firms', icon: Building2 },
-  { key: 'SALONS', label: 'Salons', icon: Scissors },
-];
-
-const relationTypeLabels: Record<string, string> = {
-  SPOUSE: 'Spouse',
-  CHILD: 'Child',
-  PARENT: 'Parent',
-  SIBLING: 'Sibling',
-  EMERGENCY_CONTACT: 'Emergency Contact',
-  OTHER: 'Other',
-};
-
-const firmTypeLabels: Record<string, string> = {
-  PROPRIETORSHIP: 'Proprietorship',
-  PARTNERSHIP: 'Partnership',
-  PRIVATE_LIMITED: 'Private Limited',
-  LLP: 'LLP',
-};
+const PAN_PATTERN = /^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/;
+const AADHAAR_PATTERN = /^\d{12}$/;
 
 function formatDate(iso?: string): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 export function FranchiseeDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { currentUser } = useApp();
+  const admin = isAdmin(currentUser?.roles);
+
   const [franchisee, setFranchisee] = useState<Franchisee | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -90,115 +59,71 @@ export function FranchiseeDetail() {
     load();
   }, [load]);
 
-  const [activeTab, setActiveTab] = useState<Tab>('FRANCHISEE_INFO');
-  const [rejectModal, setRejectModal] = useState<{ section: SectionName; isReReject: boolean } | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [verifyModal, setVerifyModal] = useState<{ section: SectionName } | null>(null);
-  const [busy, setBusy] = useState(false);
+  // General-info edit (name/dob/contact/address) — true partial update.
+  const [editModal, setEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<UpdateFranchiseeInput>({});
+  const [editBusy, setEditBusy] = useState(false);
 
-  const [relationModal, setRelationModal] = useState<{ relation: Relation | null } | null>(null);
-  const [relationForm, setRelationForm] = useState<RelationInput>({ name: '', relationType: 'SPOUSE' });
-  const [relationError, setRelationError] = useState<string | null>(null);
-  const [relationBusy, setRelationBusy] = useState(false);
-  const [deleteRelationTarget, setDeleteRelationTarget] = useState<Relation | null>(null);
-
-  const openAddRelation = () => {
-    setRelationForm({ name: '', relationType: 'SPOUSE' });
-    setRelationError(null);
-    setRelationModal({ relation: null });
-  };
-
-  const openEditRelation = (rel: Relation) => {
-    setRelationForm({
-      name: rel.name,
-      relationType: rel.relationType,
-      dateOfBirth: rel.dateOfBirth,
-      anniversaryDate: rel.anniversaryDate,
-      phone: rel.phone,
-    });
-    setRelationError(null);
-    setRelationModal({ relation: rel });
-  };
-
-  const handleSaveRelation = async () => {
+  const openEdit = () => {
     if (!franchisee) return;
-    if (!relationForm.name.trim()) {
-      setRelationError('Name is required.');
+    setEditForm({
+      name: franchisee.name,
+      dob: franchisee.dob,
+      contact: franchisee.contact,
+      address: franchisee.address,
+    });
+    setEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!franchisee) return;
+    setEditBusy(true);
+    try {
+      const updated = await updateFranchisee(franchisee.id, editForm);
+      setFranchisee(updated);
+      showToast('success', 'Franchisee updated.');
+      setEditModal(false);
+    } catch (err) {
+      showToast('error', err instanceof ApiError ? err.message : 'Failed to update franchisee.');
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  // Update sensitive info (admin only, step-up gated).
+  const [sensitiveModal, setSensitiveModal] = useState(false);
+  const [sensitiveForm, setSensitiveForm] = useState({ pan: '', aadhaar: '' });
+  const [sensitiveCode, setSensitiveCode] = useState('');
+  const [sensitiveBusy, setSensitiveBusy] = useState(false);
+  const [sensitiveError, setSensitiveError] = useState<string | null>(null);
+
+  const handleUpdateSensitive = async () => {
+    if (!franchisee) return;
+    if (!PAN_PATTERN.test(sensitiveForm.pan.trim())) {
+      setSensitiveError('Enter a valid PAN (e.g. ABCDE1234F).');
       return;
     }
-    setRelationBusy(true);
-    try {
-      if (relationModal?.relation) {
-        await apiUpdateRelation(franchisee.id, relationModal.relation.id, relationForm);
-        showToast('success', 'Relation updated.');
-      } else {
-        await apiCreateRelation(franchisee.id, relationForm);
-        showToast('success', 'Relation added.');
-      }
-      setRelationModal(null);
-      load();
-    } catch (err) {
-      setRelationError(err instanceof ApiError ? err.message : 'Failed to save relation.');
-    } finally {
-      setRelationBusy(false);
+    if (!AADHAAR_PATTERN.test(sensitiveForm.aadhaar.trim())) {
+      setSensitiveError('Enter a valid 12-digit Aadhaar number.');
+      return;
     }
-  };
-
-  const handleDeleteRelation = async () => {
-    if (!franchisee || !deleteRelationTarget) return;
-    setRelationBusy(true);
-    try {
-      await apiDeleteRelation(franchisee.id, deleteRelationTarget.id);
-      showToast('success', 'Relation removed.');
-      setDeleteRelationTarget(null);
-      load();
-    } catch (err) {
-      showToast('error', err instanceof ApiError ? err.message : 'Failed to remove relation.');
-    } finally {
-      setRelationBusy(false);
+    if (!/^\d{6}$/.test(sensitiveCode)) {
+      setSensitiveError('Enter the 6-digit code from your authenticator app.');
+      return;
     }
-  };
-
-  const currentSection = useMemo(
-    () => franchisee?.sections.find((s) => s.section === activeTab),
-    [franchisee, activeTab],
-  );
-
-  const allSalons = useMemo(() => {
-    if (!franchisee) return [];
-    return franchisee.firms.flatMap((firm) =>
-      firm.salons.map((sal) => ({ ...sal, firmLegalName: firm.legalName, firmId: firm.id })),
-    );
-  }, [franchisee]);
-
-  const handleVerify = async (section: SectionName) => {
-    if (!franchisee) return;
-    setBusy(true);
+    setSensitiveBusy(true);
+    setSensitiveError(null);
     try {
-      await apiVerifySection(franchisee.id, section);
-      setVerifyModal(null);
-      showToast('success', `${sectionLabels[section]} section verified successfully.`);
+      const { stepUpToken } = await requestStepUp(sensitiveCode);
+      await updateSensitiveInfo(franchisee.id, { pan: sensitiveForm.pan.trim(), aadhaar: sensitiveForm.aadhaar.trim() }, stepUpToken);
+      showToast('success', 'Sensitive info updated.');
+      setSensitiveModal(false);
+      setSensitiveCode('');
       load();
     } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Failed to verify section.');
+      setSensitiveError(err instanceof ApiError ? err.message : 'Failed to update sensitive info.');
     } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRejectConfirm = async () => {
-    if (!rejectModal || !rejectReason.trim() || !franchisee) return;
-    setBusy(true);
-    try {
-      await apiRejectSection(franchisee.id, rejectModal.section, rejectReason);
-      showToast('info', `${sectionLabels[rejectModal.section]} section rejected. The franchisee will be notified.`);
-      setRejectModal(null);
-      setRejectReason('');
-      load();
-    } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Failed to reject section.');
-    } finally {
-      setBusy(false);
+      setSensitiveBusy(false);
     }
   };
 
@@ -214,11 +139,6 @@ export function FranchiseeDetail() {
               <Skeleton className="h-4 w-40" />
             </div>
           </div>
-          <div className="flex gap-2 mb-6">
-            {tabs.map((t) => (
-              <Skeleton key={t.key} className="h-10 w-28 rounded-full" />
-            ))}
-          </div>
           <div className="space-y-3">
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-20 w-full" />
@@ -233,375 +153,158 @@ export function FranchiseeDetail() {
       <EmptyState
         title="Franchisee not found"
         message={loadError ?? 'This franchisee record may have been removed.'}
-        action={<Button onClick={() => navigate('/review')}>Back to Directory</Button>}
+        action={<Button onClick={() => navigate('/franchisees')}>Back to Franchisees</Button>}
       />
     );
   }
 
-
   return (
     <div className="space-y-6">
-      {/* Back link */}
       <button
-        onClick={() => navigate('/review')}
+        onClick={() => navigate('/franchisees')}
         className="inline-flex items-center gap-1.5 text-sm text-ink-secondary hover:text-brand-700 transition-colors"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back to Review Queue
+        Back to Franchisees
       </button>
 
-      {/* Header */}
       <Card className="p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Avatar initials={getInitials(franchisee.pan || franchisee.id)} size="lg" />
+            <Avatar initials={getInitials(franchisee.name || franchisee.id)} size="lg" />
             <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-xl font-bold text-ink">Franchisee #{franchisee.id}</h1>
-                <Badge kind={franchisee.overallStatus} size="md" />
-              </div>
-              <p className="text-sm text-ink-secondary mt-1">
-                {franchisee.franchiseeType === 'INDIVIDUAL' ? 'Individual Franchisee' : 'Company Franchisee'} ·
-                Created {formatDate(franchisee.createdAt)}
-              </p>
+              <h1 className="text-xl font-bold text-ink">{franchisee.name || `Franchisee #${franchisee.id}`}</h1>
+              <p className="text-sm text-ink-secondary mt-1">Created {formatDate(franchisee.createdAt)}</p>
             </div>
           </div>
+          <Button variant="secondary" onClick={openEdit}>
+            <Pencil className="h-4 w-4" />
+            Edit
+          </Button>
         </div>
 
-        {/* Section status summary */}
-        <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {franchisee.sections.map((sec) => (
-            <div
-              key={sec.section}
-              className="rounded-xl bg-surface-subtle px-4 py-3 flex items-center justify-between"
-            >
-              <span className="text-xs font-medium text-ink-secondary">{sectionLabels[sec.section]}</span>
-              <Badge kind={sec.status} />
-            </div>
-          ))}
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <InfoRow icon={UserIcon} label="Contact" value={franchisee.contact || '—'} />
+          <InfoRow icon={Calendar} label="Date of Birth" value={formatDate(franchisee.dob)} />
+          <InfoRow label="Address" value={franchisee.address || '—'} />
         </div>
       </Card>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all ${
-              activeTab === tab.key
-                ? 'bg-gradient-to-r from-brand-600 to-brand-400 text-white shadow-card'
-                : 'bg-white text-ink-secondary border border-brand-100 hover:border-brand-300 hover:text-brand-700'
-            }`}
-          >
-            <tab.icon className="h-4 w-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content + actions */}
       <Card className="p-6">
-        {/* Section status + actions bar */}
-        {currentSection && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-brand-50">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-ink-secondary">Section status:</span>
-              <Badge kind={currentSection.status} size="md" />
-              {currentSection.verifiedBy && (
-                <span className="inline-flex items-center gap-1 text-xs text-ink-secondary">
-                  <BadgeCheck className="h-3.5 w-3.5 text-status-verified" />
-                  Verified by {currentSection.verifiedBy} on {formatDate(currentSection.verifiedAt)}
-                </span>
-              )}
-              {currentSection.rejectionReason && (
-                <span className="text-xs text-status-rejected">
-                  Reason: {currentSection.rejectionReason}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => setVerifyModal({ section: activeTab })}
-                disabled={currentSection.status === 'VERIFIED'}
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                {currentSection.status === 'VERIFIED' ? 'Re-verify' : 'Verify'}
-              </Button>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() =>
-                  setRejectModal({
-                    section: activeTab,
-                    isReReject: currentSection.status === 'VERIFIED',
-                  })
-                }
-              >
-                <XCircle className="h-4 w-4" />
-                {currentSection.status === 'VERIFIED' ? 'Re-reject' : 'Reject'}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* FRANCHISEE_INFO */}
-        {activeTab === 'FRANCHISEE_INFO' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-            <InfoRow icon={UserIcon} label="Franchisee ID" value={`#${franchisee.id}`} />
-            <InfoRow label="Franchisee Type" value={franchisee.franchiseeType === 'INDIVIDUAL' ? 'Individual' : 'Company'} />
-            <InfoRow label="PAN" value={franchisee.pan || '—'} />
-            <InfoRow label="Date of Birth" value={formatDate(franchisee.dateOfBirth)} />
-            <InfoRow label="Company Registration No." value={franchisee.companyRegistrationNumber || '—'} />
-            <InfoRow label="Address" value={franchisee.address || '—'} />
-            <InfoRow icon={Calendar} label="Created At" value={formatDate(franchisee.createdAt)} />
-          </div>
-        )}
-
-        {/* RELATIONS */}
-        {activeTab === 'RELATIONS' && (
-          <div>
-            <div className="flex justify-end mb-4">
-              <Button size="sm" variant="secondary" onClick={openAddRelation}>
-                <Plus className="h-4 w-4" />
-                Add Relation
-              </Button>
-            </div>
-            {franchisee.relations.length === 0 ? (
-              <EmptyState
-                title="No relations added"
-                message="This franchisee hasn't added any relations yet."
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-ink">Sensitive Information</h2>
+          {admin && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setSensitiveForm({ pan: '', aadhaar: '' });
+                setSensitiveCode('');
+                setSensitiveError(null);
+                setSensitiveModal(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Update
+            </Button>
+          )}
+        </div>
+        {admin ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs text-ink-secondary font-medium mb-1">PAN</p>
+              <SensitiveField
+                label="PAN"
+                maskedValue={franchisee.panLast4 ? `•••• ${franchisee.panLast4}` : '—'}
+                onReveal={async (stepUpToken) => (await revealSensitiveInfo(franchisee.id, stepUpToken)).pan}
               />
-            ) : (
-              <div className="space-y-3">
-                {franchisee.relations.map((rel) => (
-                  <div
-                    key={rel.id}
-                    className="flex items-center gap-4 rounded-xl border border-brand-50 bg-surface-subtle px-5 py-4"
-                  >
-                    <Avatar initials={getInitials(rel.name)} size="sm" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-ink">{rel.name}</p>
-                      <p className="text-xs text-ink-secondary mt-0.5">
-                        {relationTypeLabels[rel.relationType] ?? rel.relationType}
-                        {rel.dateOfBirth && ` · DOB: ${formatDate(rel.dateOfBirth)}`}
-                        {rel.anniversaryDate && ` · Anniversary: ${formatDate(rel.anniversaryDate)}`}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => openEditRelation(rel)}
-                      className="rounded-lg p-2 text-ink-secondary hover:bg-white hover:text-brand-700 transition-colors"
-                      aria-label="Edit relation"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setDeleteRelationTarget(rel)}
-                      className="rounded-lg p-2 text-ink-secondary hover:bg-white hover:text-status-rejected transition-colors"
-                      aria-label="Remove relation"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+            </div>
+            <div>
+              <p className="text-xs text-ink-secondary font-medium mb-1">Aadhaar</p>
+              <SensitiveField
+                label="Aadhaar"
+                maskedValue={franchisee.aadhaarLast4 ? `•••• ${franchisee.aadhaarLast4}` : '—'}
+                onReveal={async (stepUpToken) => (await revealSensitiveInfo(franchisee.id, stepUpToken)).aadhaar}
+              />
+            </div>
           </div>
-        )}
-
-        {/* FIRMS */}
-        {activeTab === 'FIRMS' && (
-          <div>
-            {franchisee.firms.length === 0 ? (
-              <EmptyState title="No firms added" message="This franchisee hasn't added any firms yet." />
-            ) : (
-              <div className="space-y-3">
-                {franchisee.firms.map((firm) => (
-                  <div
-                    key={firm.id}
-                    onClick={() => navigate(`/firm/${firm.id}`)}
-                    className="flex items-center gap-4 rounded-xl border border-brand-50 bg-surface-subtle px-5 py-4 cursor-pointer hover:border-brand-200 hover:bg-brand-50/50 transition-all group"
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                      <Building2 className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-ink group-hover:text-brand-700 transition-colors">
-                        {firm.legalName}
-                      </p>
-                      <p className="text-xs text-ink-secondary mt-0.5">
-                        {firmTypeLabels[firm.companyType]} · GST: {firm.gstNumber} · {firm.salons.length} salon(s)
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-ink-secondary/30 group-hover:text-brand-600 transition-colors" />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* SALONS */}
-        {activeTab === 'SALONS' && (
-          <div>
-            {allSalons.length === 0 ? (
-              <EmptyState title="No salons added" message="This franchisee has no salons across their firms yet." />
-            ) : (
-              <div className="space-y-3">
-                {allSalons.map((sal) => (
-                  <div
-                    key={sal.id}
-                    onClick={() => navigate(`/salon/${sal.id}`)}
-                    className="flex items-center gap-4 rounded-xl border border-brand-50 bg-surface-subtle px-5 py-4 cursor-pointer hover:border-brand-200 hover:bg-brand-50/50 transition-all group"
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                      <Scissors className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-ink group-hover:text-brand-700 transition-colors">
-                        {sal.salonName}
-                      </p>
-                      <p className="text-xs text-ink-secondary mt-0.5 truncate">
-                        {sal.address || '—'}
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-ink-secondary/30 group-hover:text-brand-600 transition-colors" />
-                  </div>
-                ))}
-              </div>
-            )}
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <InfoRow label="PAN" value={franchisee.panLast4 ? `•••• ${franchisee.panLast4}` : '—'} />
+            <InfoRow label="Aadhaar" value={franchisee.aadhaarLast4 ? `•••• ${franchisee.aadhaarLast4}` : '—'} />
           </div>
         )}
       </Card>
 
-      {/* Verify confirmation modal */}
-      <Modal
-        open={!!verifyModal}
-        onClose={() => setVerifyModal(null)}
-        title={`Verify ${verifyModal ? sectionLabels[verifyModal.section] : ''} section?`}
-        description="Confirm that you've reviewed all information in this section and it meets the requirements."
-        primaryLabel="Confirm Verification"
-        primaryDisabled={busy}
-        onPrimary={() => verifyModal && handleVerify(verifyModal.section)}
-      >
-        <div className="flex items-start gap-3 rounded-xl bg-brand-50 px-4 py-3">
-          <CheckCircle2 className="h-5 w-5 text-brand-600 shrink-0 mt-0.5" />
-          <p className="text-sm text-ink">
-            Once verified, the section will be marked as approved. You can still re-reject it later if needed.
-          </p>
-        </div>
-      </Modal>
+      <DocumentsPanel entityType="FRANCHISEE" entityId={franchisee.id} />
 
-      {/* Reject modal */}
+      {/* Edit modal */}
       <Modal
-        open={!!rejectModal}
-        onClose={() => {
-          setRejectModal(null);
-          setRejectReason('');
-        }}
-        title={`Reject ${rejectModal ? sectionLabels[rejectModal.section] : ''} section`}
-        description={
-          rejectModal?.isReReject
-            ? 'This section was already verified. Rejecting it will require the franchisee to resubmit.'
-            : 'The franchisee will be notified and asked to correct and resubmit this section.'
-        }
-        primaryLabel="Confirm Rejection"
-        primaryVariant="danger"
-        primaryDisabled={!rejectReason.trim() || busy}
-        onPrimary={handleRejectConfirm}
-      >
-        <Textarea
-          label="Rejection reason"
-          placeholder="Explain what needs to be corrected..."
-          rows={4}
-          value={rejectReason}
-          onChange={(e) => setRejectReason(e.target.value)}
-          error={!rejectReason.trim() && rejectModal ? 'A reason is required to reject a section.' : undefined}
-        />
-      </Modal>
-
-      {/* Add / edit relation modal */}
-      <Modal
-        open={!!relationModal}
-        onClose={() => setRelationModal(null)}
-        title={relationModal?.relation ? 'Edit relation' : 'Add relation'}
-        primaryLabel={relationModal?.relation ? 'Save changes' : 'Add relation'}
-        primaryDisabled={relationBusy}
-        onPrimary={handleSaveRelation}
+        open={editModal}
+        onClose={() => setEditModal(false)}
+        title="Edit Franchisee"
+        primaryLabel={editBusy ? 'Saving...' : 'Save Changes'}
+        primaryDisabled={editBusy}
+        onPrimary={handleSaveEdit}
       >
         <div className="space-y-4">
-          {relationError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-status-rejected">
-              {relationError}
-            </div>
-          )}
-          <Input
-            label="Name"
-            value={relationForm.name}
-            onChange={(e) => setRelationForm((f) => ({ ...f, name: e.target.value }))}
-          />
-          <Select
-            label="Relation type"
-            value={relationForm.relationType}
-            onChange={(e) =>
-              setRelationForm((f) => ({ ...f, relationType: e.target.value }))
-            }
-          >
-            {Object.entries(relationTypeLabels).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
+          <Input label="Name" value={editForm.name ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
           <Input
             label="Date of birth"
             type="date"
-            value={relationForm.dateOfBirth ?? ''}
-            onChange={(e) => setRelationForm((f) => ({ ...f, dateOfBirth: e.target.value || undefined }))}
+            value={editForm.dob ?? ''}
+            onChange={(e) => setEditForm((f) => ({ ...f, dob: e.target.value }))}
           />
-          <Input
-            label="Anniversary date"
-            type="date"
-            value={relationForm.anniversaryDate ?? ''}
-            onChange={(e) => setRelationForm((f) => ({ ...f, anniversaryDate: e.target.value || undefined }))}
-          />
-          <Input
-            label="Phone (+91XXXXXXXXXX)"
-            placeholder="+919876543210"
-            value={relationForm.phone ?? ''}
-            onChange={(e) => setRelationForm((f) => ({ ...f, phone: e.target.value || undefined }))}
-          />
+          <Input label="Contact" value={editForm.contact ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, contact: e.target.value }))} />
+          <Input label="Address" value={editForm.address ?? ''} onChange={(e) => setEditForm((f) => ({ ...f, address: e.target.value }))} />
         </div>
       </Modal>
 
-      {/* Delete relation confirm */}
+      {/* Update sensitive info modal (admin only, step-up gated) */}
       <Modal
-        open={!!deleteRelationTarget}
-        onClose={() => setDeleteRelationTarget(null)}
-        title="Remove relation?"
-        description={deleteRelationTarget ? `This will remove ${deleteRelationTarget.name} from the franchisee's relations.` : undefined}
-        primaryLabel="Remove"
-        primaryVariant="danger"
-        primaryDisabled={relationBusy}
-        onPrimary={handleDeleteRelation}
+        open={sensitiveModal}
+        onClose={() => setSensitiveModal(false)}
+        title="Update Sensitive Info"
+        description="Requires a fresh verification code."
+        primaryLabel={sensitiveBusy ? 'Saving...' : 'Save'}
+        primaryDisabled={sensitiveBusy}
+        onPrimary={handleUpdateSensitive}
       >
-        <div />
+        <div className="space-y-4">
+          {sensitiveError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-status-rejected">
+              <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+              {sensitiveError}
+            </div>
+          )}
+          <Input
+            label="PAN"
+            placeholder="ABCDE1234F"
+            value={sensitiveForm.pan}
+            onChange={(e) => setSensitiveForm((f) => ({ ...f, pan: e.target.value.toUpperCase() }))}
+          />
+          <Input
+            label="Aadhaar"
+            placeholder="123456789012"
+            value={sensitiveForm.aadhaar}
+            onChange={(e) => setSensitiveForm((f) => ({ ...f, aadhaar: e.target.value.replace(/\D/g, '').slice(0, 12) }))}
+          />
+          <Input
+            label="Verification code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="123456"
+            value={sensitiveCode}
+            onChange={(e) => setSensitiveCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          />
+        </div>
       </Modal>
     </div>
   );
 }
 
-function InfoRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon?: typeof UserIcon;
-  label: string;
-  value: string;
-}) {
+function InfoRow({ icon: Icon, label, value }: { icon?: typeof UserIcon; label: string; value: string }) {
   return (
     <div className="flex items-start gap-3 rounded-xl bg-surface-subtle px-4 py-3.5">
       {Icon && (

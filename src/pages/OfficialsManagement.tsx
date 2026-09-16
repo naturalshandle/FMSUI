@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ShieldCheck, Plus, Search, Link2, Pencil, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select } from '@/components/ui/Input';
+import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonTable } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
+import { usePagedList } from '@/lib/pagination';
 import {
   listOfficials,
   createOfficial,
@@ -17,6 +19,8 @@ import {
   OfficialInUseError,
 } from '@/lib/officialsApi';
 import { ApiError } from '@/lib/api';
+import { useApp } from '@/context/AppContext';
+import { isAdmin } from '@/lib/roles';
 import type { Official } from '@/types';
 
 const officialTypeLabels: Record<string, string> = {
@@ -27,17 +31,30 @@ const officialTypeLabels: Record<string, string> = {
 
 const officialTypeOptions = Object.keys(officialTypeLabels);
 
-const emptyForm = { officialType: '', name: '', contact: '', email: '', region: '' };
+const emptyForm = { officialType: '', name: '', contact: '', email: '', region: '', createLogin: false };
 
 export function OfficialsManagement() {
   const { showToast } = useToast();
-  const [officials, setOfficials] = useState<Official[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { currentUser } = useApp();
+  const admin = isAdmin(currentUser?.roles);
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [regionFilter, setRegionFilter] = useState('');
+
+  const {
+    content: officials,
+    page,
+    setPage,
+    totalElements,
+    totalPages,
+    loading,
+    error,
+    reload,
+  } = usePagedList(
+    (p, size) => listOfficials({ officialType: typeFilter || undefined, region: regionFilter || undefined, page: p, size }),
+    [typeFilter, regionFilter],
+  );
 
   const [createModal, setCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState(emptyForm);
@@ -53,28 +70,20 @@ export function OfficialsManagement() {
   const [deleteModal, setDeleteModal] = useState<Official | null>(null);
   const [deleteBlockedCount, setDeleteBlockedCount] = useState<number | null>(null);
 
-  const load = () => {
-    setLoading(true);
-    setError(null);
-    listOfficials({ officialType: typeFilter || undefined, region: regionFilter || undefined })
-      .then((page) => setOfficials(page.content))
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load officials.'))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(load, [typeFilter, regionFilter]);
-
   const filtered = officials.filter((o) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return o.name.toLowerCase().includes(q) || o.contact.toLowerCase().includes(q);
   });
+  const isFiltered = !!(search.trim() || typeFilter || regionFilter);
 
   const handleCreate = async () => {
     const errs: Record<string, string> = {};
     if (!createForm.officialType) errs.officialType = 'Type is required';
     if (!createForm.name.trim()) errs.name = 'Name is required';
-    if (!createForm.contact.trim()) errs.contact = 'Contact is required';
+    if (createForm.createLogin && !createForm.email.trim()) {
+      errs.email = 'Email is required to create a login.';
+    }
     setCreateErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
@@ -83,16 +92,22 @@ export function OfficialsManagement() {
       await createOfficial({
         officialType: createForm.officialType,
         name: createForm.name.trim(),
-        contact: createForm.contact.trim(),
+        contact: createForm.contact.trim() || undefined,
         email: createForm.email.trim() || undefined,
         region: createForm.region.trim() || undefined,
         userId: null,
+        createLogin: createForm.createLogin,
       });
-      showToast('success', `${createForm.name} added as an official.`);
+      showToast(
+        'success',
+        createForm.createLogin
+          ? `Official created. A temporary password has been emailed to ${createForm.email.trim()}.`
+          : `${createForm.name} added as an official.`,
+      );
       setCreateModal(false);
       setCreateForm(emptyForm);
       setCreateErrors({});
-      load();
+      reload();
     } catch (err) {
       showToast('error', err instanceof ApiError ? err.message : 'Failed to create official.');
     } finally {
@@ -102,13 +117,21 @@ export function OfficialsManagement() {
 
   const openEdit = (o: Official) => {
     setEditModal(o);
-    setEditForm({ officialType: o.officialType, name: o.name, contact: o.contact, email: o.email ?? '', region: o.region ?? '' });
+    setEditForm({
+      officialType: o.officialType,
+      name: o.name,
+      contact: o.contact,
+      email: o.email ?? '',
+      region: o.region ?? '',
+      createLogin: false,
+    });
   };
 
   const handleEdit = async () => {
     if (!editModal) return;
     setSaving(true);
     try {
+      // PATCH here is a full replace despite the verb — always resend every field.
       await updateOfficial(editModal.id, {
         officialType: editForm.officialType,
         name: editForm.name.trim(),
@@ -118,7 +141,7 @@ export function OfficialsManagement() {
       });
       showToast('success', 'Official updated.');
       setEditModal(null);
-      load();
+      reload();
     } catch (err) {
       showToast('error', err instanceof ApiError ? err.message : 'Failed to update official.');
     } finally {
@@ -134,7 +157,7 @@ export function OfficialsManagement() {
       showToast('success', `Login linked to ${linkModal.name}.`);
       setLinkModal(null);
       setLinkUserId('');
-      load();
+      reload();
     } catch (err) {
       showToast('error', err instanceof ApiError ? err.message : 'Failed to link user.');
     } finally {
@@ -150,7 +173,7 @@ export function OfficialsManagement() {
       showToast('success', `${deleteModal.name} deleted.`);
       setDeleteModal(null);
       setDeleteBlockedCount(null);
-      load();
+      reload();
     } catch (err) {
       if (err instanceof OfficialInUseError) {
         setDeleteBlockedCount(err.count ?? null);
@@ -172,10 +195,12 @@ export function OfficialsManagement() {
             Cluster managers, regional managers, and state heads assignable to salons
           </p>
         </div>
-        <Button onClick={() => setCreateModal(true)}>
-          <Plus className="h-4 w-4" />
-          Add Official
-        </Button>
+        {admin && (
+          <Button onClick={() => setCreateModal(true)}>
+            <Plus className="h-4 w-4" />
+            Add Official
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
@@ -200,7 +225,32 @@ export function OfficialsManagement() {
         ) : error ? (
           <EmptyState title="Couldn't load officials" message={error} icon={<ShieldCheck className="h-8 w-8" />} />
         ) : filtered.length === 0 ? (
-          <EmptyState title="No officials found" message="Add an official to get started." icon={<ShieldCheck className="h-8 w-8" />} />
+          isFiltered ? (
+            <EmptyState
+              title="No officials found"
+              message="No officials match these filters."
+              icon={<ShieldCheck className="h-8 w-8" />}
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSearch('');
+                    setTypeFilter('');
+                    setRegionFilter('');
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              title="No officials have been added yet"
+              message={admin ? 'Create the first one to get started.' : 'None have been added yet.'}
+              icon={<ShieldCheck className="h-8 w-8" />}
+              action={admin ? <Button onClick={() => setCreateModal(true)}>Add Official</Button> : undefined}
+            />
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -211,7 +261,7 @@ export function OfficialsManagement() {
                   <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Region</th>
                   <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Contact</th>
                   <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Linked User</th>
-                  <th className="px-3 py-3" />
+                  {admin && <th className="px-3 py-3" />}
                 </tr>
               </thead>
               <tbody>
@@ -230,22 +280,24 @@ export function OfficialsManagement() {
                         <span className="text-xs text-ink-secondary">Not linked</span>
                       )}
                     </td>
-                    <td className="px-3 py-4">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {!o.userId && (
-                          <Button size="sm" variant="ghost" onClick={() => setLinkModal(o)}>
-                            <Link2 className="h-3.5 w-3.5" />
-                            Link User
+                    {admin && (
+                      <td className="px-3 py-4">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {!o.userId && (
+                            <Button size="sm" variant="ghost" onClick={() => setLinkModal(o)}>
+                              <Link2 className="h-3.5 w-3.5" />
+                              Link User
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
+                            <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="danger" onClick={() => { setDeleteModal(o); setDeleteBlockedCount(null); }}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
+                          <Button size="sm" variant="danger" onClick={() => { setDeleteModal(o); setDeleteBlockedCount(null); }}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -254,7 +306,11 @@ export function OfficialsManagement() {
         )}
       </Card>
 
-      {/* Create modal */}
+      {!isFiltered && filtered.length > 0 && (
+        <Pagination page={page} totalPages={totalPages} totalElements={totalElements} onPageChange={setPage} itemLabel="official" />
+      )}
+
+      {/* Create modal (admin only) */}
       <Modal
         open={createModal}
         onClose={() => {
@@ -279,13 +335,27 @@ export function OfficialsManagement() {
           </Select>
           {createErrors.officialType && <p className="text-xs text-status-rejected -mt-2">{createErrors.officialType}</p>}
           <Input label="Name" value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} error={createErrors.name} />
-          <Input label="Contact" value={createForm.contact} onChange={(e) => setCreateForm({ ...createForm, contact: e.target.value })} error={createErrors.contact} />
-          <Input label="Email" type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} />
+          <Input label="Contact" value={createForm.contact} onChange={(e) => setCreateForm({ ...createForm, contact: e.target.value })} />
+          <Input
+            label={`Email${createForm.createLogin ? ' (required)' : ' (optional)'}`}
+            type="email"
+            value={createForm.email}
+            onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+            error={createErrors.email}
+          />
           <Input label="Region" value={createForm.region} onChange={(e) => setCreateForm({ ...createForm, region: e.target.value })} />
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={createForm.createLogin}
+              onChange={(e) => setCreateForm({ ...createForm, createLogin: e.target.checked })}
+            />
+            Create a new login for this official
+          </label>
         </div>
       </Modal>
 
-      {/* Edit modal */}
+      {/* Edit modal (admin only) */}
       <Modal
         open={!!editModal}
         onClose={() => setEditModal(null)}
@@ -303,6 +373,11 @@ export function OfficialsManagement() {
               </option>
             ))}
           </Select>
+          {editModal?.userId && (
+            <p className="text-xs text-ink-secondary -mt-2">
+              Note: changing the type does not re-check the linked user's role.
+            </p>
+          )}
           <Input label="Name" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
           <Input label="Contact" value={editForm.contact} onChange={(e) => setEditForm({ ...editForm, contact: e.target.value })} />
           <Input label="Email" type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
@@ -310,7 +385,7 @@ export function OfficialsManagement() {
         </div>
       </Modal>
 
-      {/* Link user modal */}
+      {/* Link user modal (admin only) */}
       <Modal
         open={!!linkModal}
         onClose={() => {
@@ -332,7 +407,7 @@ export function OfficialsManagement() {
         />
       </Modal>
 
-      {/* Delete modal */}
+      {/* Delete modal (admin only) */}
       <Modal
         open={!!deleteModal}
         onClose={() => {
@@ -352,7 +427,10 @@ export function OfficialsManagement() {
             Reassign {deleteBlockedCount === 1 ? 'that salon' : 'those salons'} to a different official before deleting.
           </div>
         ) : (
-          <p className="text-sm text-ink-secondary">This action cannot be undone.</p>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            This cannot be undone, and the backend does not check whether this official is still assigned to a live
+            salon before deleting.
+          </div>
         )}
       </Modal>
     </div>

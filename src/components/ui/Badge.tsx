@@ -1,6 +1,8 @@
-import type { SectionState } from '@/types';
-
-type BadgeKind = SectionState | 'ONBOARDED';
+/** Generic colored-pill primitive, reused for non-lifecycle labels (company type,
+ * official type, etc.) elsewhere in the app. For a domain lifecycle status, prefer
+ * StatusBadge (components/ui/StatusBadge.tsx), which implements spec §0.4's 6
+ * semantic buckets instead of this fixed 4-value set. */
+type BadgeKind = 'VERIFIED' | 'SUBMITTED' | 'REJECTED' | 'DRAFT' | 'ONBOARDED' | 'AWAITING_ADMIN';
 
 const badgeConfig: Record<BadgeKind, { label: string; classes: string; dot: string }> = {
   VERIFIED: { label: 'Verified', classes: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-status-verified' },
@@ -8,6 +10,7 @@ const badgeConfig: Record<BadgeKind, { label: string; classes: string; dot: stri
   REJECTED: { label: 'Rejected', classes: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-status-rejected' },
   DRAFT: { label: 'Draft', classes: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-status-draft' },
   ONBOARDED: { label: 'Onboarded', classes: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-status-verified' },
+  AWAITING_ADMIN: { label: 'Awaiting Admin', classes: 'bg-blue-50 text-blue-700 border-blue-200', dot: 'bg-blue-500' },
 };
 
 interface BadgeProps {

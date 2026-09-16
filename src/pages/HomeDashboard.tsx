@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
   Building2,
   Scissors,
-  ArrowRight,
-  ClipboardCheck,
+  FilePlus2,
+  FileText,
+  Percent,
+  AlertTriangle,
   UserPlus,
   ShieldCheck,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
@@ -18,23 +18,16 @@ import { Button } from '@/components/ui/Button';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { getDashboard, ApiError } from '@/lib/api';
+import { getDashboard } from '@/lib/dashboardApi';
+import { ApiError } from '@/lib/api';
+import { roleLabels } from '@/lib/roles';
 import type { DashboardData } from '@/types';
-
-const roleLabels: Record<string, string> = {
-  SUPER_ADMIN: 'Super Admin',
-  CORPORATE_ADMIN: 'Corporate Admin',
-  STATE_HEAD: 'State Head',
-  REGIONAL_MANAGER: 'Regional Manager',
-  CLUSTER_MANAGER: 'Cluster Manager',
-};
 
 function displayName(email?: string): string {
   return email ? email.split('@')[0] : '';
 }
 
-/** GET /api/v1/admin/dashboard response shape is unverified — every field below is read
- * defensively with a fallback so the page renders regardless of the real field names. */
+/** GET /api/v1/dashboard per spec §9 — unscoped, identical for every role. */
 export function HomeDashboard() {
   const { currentUser } = useApp();
   const navigate = useNavigate();
@@ -49,39 +42,6 @@ export function HomeDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const statCards = stats
-    ? [
-        {
-          label: 'Total Franchisees',
-          value: stats.totalFranchisees ?? '—',
-          icon: Users,
-          color: 'from-brand-600 to-brand-400',
-          filter: 'all',
-        },
-        {
-          label: 'Pending Review',
-          value: stats.pendingReview ?? '—',
-          icon: Clock,
-          color: 'from-amber-500 to-amber-400',
-          filter: 'SUBMITTED',
-        },
-        {
-          label: 'Onboarded',
-          value: stats.onboarded ?? '—',
-          icon: CheckCircle2,
-          color: 'from-green-600 to-green-500',
-          filter: 'VERIFIED',
-        },
-        {
-          label: 'Needs Franchisee Action',
-          value: stats.needsAction ?? '—',
-          icon: AlertTriangle,
-          color: 'from-red-500 to-red-400',
-          filter: 'REJECTED',
-        },
-      ]
-    : [];
-
   return (
     <div className="space-y-6">
       {/* Welcome header */}
@@ -89,9 +49,7 @@ export function HomeDashboard() {
         <div className="flex items-center gap-4">
           <Avatar initials={getInitials(displayName(currentUser?.email) || 'A U')} size="lg" />
           <div>
-            <h1 className="text-2xl font-bold text-ink">
-              Welcome back, {displayName(currentUser?.email)}
-            </h1>
+            <h1 className="text-2xl font-bold text-ink">Welcome back, {displayName(currentUser?.email)}</h1>
             <p className="text-sm text-ink-secondary mt-0.5">
               {(currentUser?.roles ?? []).map((r) => roleLabels[r] ?? r).join(', ')} · Here's what needs your attention today
             </p>
@@ -102,78 +60,149 @@ export function HomeDashboard() {
             <ShieldCheck className="h-4 w-4" />
             Officials
           </Button>
-          <Button onClick={() => navigate('/admin/franchisees/new')} size="md" variant="secondary">
+          <Button onClick={() => navigate('/franchise-creation')} size="md" variant="secondary">
             <UserPlus className="h-4 w-4" />
             Add Franchisee
           </Button>
-          <Button onClick={() => navigate('/review')} size="md">
+          <Button onClick={() => navigate('/franchisees')} size="md">
             <ClipboardCheck className="h-4 w-4" />
             Go to Directory
           </Button>
         </div>
       </div>
 
-      {/* Stat cards */}
       {loading ? (
         <SkeletonCards count={4} />
       ) : error ? (
         <Card className="p-6">
           <EmptyState title="Couldn't load dashboard stats" message={error} icon={<AlertTriangle className="h-8 w-8" />} />
         </Card>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {statCards.map((card) => (
-            <Card
-              key={card.label}
-              hover
-              onClick={() => navigate(`/review?filter=${card.filter}`)}
-              className="p-5"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${card.color} text-white shadow-sm`}>
-                  <card.icon className="h-5 w-5" />
-                </div>
-                <ArrowRight className="h-4 w-4 text-ink-secondary/40" />
-              </div>
-              <p className="text-3xl font-bold text-ink leading-none">{card.value}</p>
-              <p className="text-sm text-ink-secondary mt-1.5">{card.label}</p>
-            </Card>
-          ))}
-        </div>
-      )}
+      ) : stats ? (
+        <>
+          {stats.totalFranchisees === 0 && (
+            <div className="rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-3 text-sm text-ink-secondary">
+              Nothing here yet — get started by creating your first franchise.
+            </div>
+          )}
 
-      {/* Firm/Salon totals */}
-      {!loading && !error && stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          <Card className="p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                <Building2 className="h-4.5 w-4.5" />
-              </div>
-              <span className="text-sm text-ink-secondary">Total Firms</span>
+          {/* Top row counts */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <StatCard icon={Users} label="Total Franchisees" value={stats.totalFranchisees} onClick={() => navigate('/franchisees')} />
+            <StatCard icon={Building2} label="Total Firms" value={stats.totalFirms} onClick={() => navigate('/firms')} />
+            <StatCard icon={Scissors} label="Total Salons" value={stats.totalSalons} onClick={() => navigate('/salons')} />
+            <StatCard
+              icon={FilePlus2}
+              label="Drafts In Progress"
+              value={stats.franchiseCreationDraftsInProgress}
+              onClick={() => navigate('/franchise-creation')}
+            />
+          </div>
+
+          {/* Agreements breakdown */}
+          <Card className="p-6">
+            <h2 className="text-sm font-semibold text-ink mb-4">Agreements</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <Segment label="Active" value={stats.agreementsByStatus.active} tone="green" />
+              <Segment label="Expired" value={stats.agreementsByStatus.expired} tone="orange" />
+              <Segment label="Terminated" value={stats.agreementsByStatus.terminated} tone="red" />
+              <Segment label="Superseded" value={stats.agreementsByStatus.superseded} tone="gray" />
             </div>
-            <p className="text-2xl font-bold text-ink">{stats.totalFirms ?? '—'}</p>
           </Card>
-          <Card className="p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                <Scissors className="h-4.5 w-4.5" />
-              </div>
-              <span className="text-sm text-ink-secondary">Total Salons</span>
+
+          {/* Royalty breakdown */}
+          <Card className="p-6">
+            <h2 className="text-sm font-semibold text-ink mb-4">Royalty Requests</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <Segment
+                label="Pending State Head"
+                value={stats.royaltyRequestsByStatus.pendingStateHead}
+                tone="amber"
+                icon={Percent}
+                onClick={() => navigate('/royalty-approvals')}
+              />
+              <Segment
+                label="Pending Admin"
+                value={stats.royaltyRequestsByStatus.pendingAdmin}
+                tone="amber"
+                icon={Percent}
+                onClick={() => navigate('/royalty-approvals')}
+              />
+              <Segment label="Approved" value={stats.royaltyRequestsByStatus.approved} tone="green" />
+              <Segment label="Rejected" value={stats.royaltyRequestsByStatus.rejected} tone="red" />
             </div>
-            <p className="text-2xl font-bold text-ink">{stats.totalSalons ?? '—'}</p>
           </Card>
-          <Card className="p-5">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                <ShieldCheck className="h-4.5 w-4.5" />
-              </div>
-              <span className="text-sm text-ink-secondary">Total Officials</span>
+
+          {/* Documents breakdown */}
+          <Card className="p-6">
+            <h2 className="text-sm font-semibold text-ink mb-4">Documents</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <Segment label="Pending" value={stats.documentsByVerificationStatus.pending} tone="amber" icon={FileText} />
+              <Segment label="Verified" value={stats.documentsByVerificationStatus.verified} tone="green" icon={FileText} />
+              <Segment label="Rejected" value={stats.documentsByVerificationStatus.rejected} tone="red" icon={FileText} />
             </div>
-            <p className="text-2xl font-bold text-ink">{stats.totalOfficials ?? '—'}</p>
           </Card>
-        </div>
-      )}
+        </>
+      ) : null}
     </div>
+  );
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  onClick,
+}: {
+  icon: typeof Users;
+  label: string;
+  value: number;
+  onClick: () => void;
+}) {
+  return (
+    <Card hover onClick={onClick} className="p-5">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-400 text-white shadow-sm mb-3">
+        <Icon className="h-5 w-5" />
+      </div>
+      <p className="text-3xl font-bold text-ink leading-none">{value}</p>
+      <p className="text-sm text-ink-secondary mt-1.5">{label}</p>
+    </Card>
+  );
+}
+
+const toneClasses: Record<string, string> = {
+  green: 'bg-green-50 text-green-700',
+  amber: 'bg-amber-50 text-amber-700',
+  red: 'bg-red-50 text-red-700',
+  orange: 'bg-orange-50 text-orange-700',
+  gray: 'bg-gray-100 text-gray-600',
+};
+
+function Segment({
+  label,
+  value,
+  tone,
+  icon: Icon,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  tone: string;
+  icon?: typeof Users;
+  onClick?: () => void;
+}) {
+  const content = (
+    <div className={`rounded-xl px-4 py-3 ${toneClasses[tone]}`}>
+      <div className="flex items-center gap-1.5 mb-1">
+        {Icon && <Icon className="h-3.5 w-3.5" />}
+        <span className="text-xs font-medium">{label}</span>
+      </div>
+      <p className="text-xl font-bold">{value}</p>
+    </div>
+  );
+  if (!onClick) return content;
+  return (
+    <button onClick={onClick} className="text-left hover:opacity-80 transition-opacity">
+      {content}
+    </button>
   );
 }

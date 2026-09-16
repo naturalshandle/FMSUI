@@ -1,102 +1,113 @@
-/**
- * "Add Franchisee" wizard — types for the admin data-entry flow.
- *
- * Field names below are aligned to the confirmed request DTOs in
- * docs/FMSBE_postman_collection.json (POST /admin/franchisees, POST /admin/firms,
- * POST /admin/salons, POST /admin/salons/{salonId}/agreements). Response shapes for
- * these endpoints are not verified live — adapters in wizardApi.ts fall back to the
- * submitted input when a field is absent from the response.
- */
+/** Franchise Creation wizard (spec §3) — a resumable, draft/finalize model. Every
+ * type here mirrors DraftResponse's literal shape; `currentStep` is a high-water
+ * mark (max(current, n)), never a cursor — reaching step N unlocks free
+ * back-navigation/re-edit of any step <= N without regressing the mark. */
 
-export type FranchiseeType = 'INDIVIDUAL' | 'COMPANY';
+export type DraftStatus = 'IN_PROGRESS' | 'FINALIZED' | 'ABANDONED';
 
-export interface WizardOwnerInput {
-  prefix?: string;
-  fullName: string;
-  contact: string;
-  dateOfBirth?: string;
-  email?: string;
+/** Step 1 request shape — sent to PUT .../step/franchisees. */
+export interface FranchiseeOwnerInput {
+  name: string;
+  dob: string;
   pan: string;
-  aadhaar?: string;
-  address?: string;
-  franchiseeType: FranchiseeType;
+  aadhaar: string;
+  contact: string;
+  address: string;
 }
 
-export interface WizardOwner extends WizardOwnerInput {
-  id: string;
+/** Step 1 as echoed back on the draft — pan/aadhaar are NEVER echoed, only booleans.
+ * Re-render owner rows from these booleans, never retain submitted plaintext. */
+export interface DraftFranchiseeOwner {
+  name: string;
+  dob: string;
+  contact: string;
+  address: string;
+  panProvided: boolean;
+  aadhaarProvided: boolean;
 }
 
-export type CompanyType = 'PROPRIETORSHIP' | 'PARTNERSHIP' | 'PRIVATE_LIMITED' | 'LLP';
-
-export interface WizardFirmOwner {
-  franchiseeId: number;
-  isPrimary: boolean;
-}
-
-export interface WizardFirmInput {
+export interface DraftFirmData {
   legalName: string;
-  companyType: CompanyType;
-  gstNumber?: string;
-  fpCode?: string;
-  owners: WizardFirmOwner[];
+  companyType: string;
+  gstNumber: string;
+  fpCode: string;
 }
 
-export interface WizardFirm {
-  id: string;
-  /** Primary owner's franchisee id. */
-  franchiseeId: string;
-  legalName: string;
-  companyType: CompanyType;
-  gstNumber?: string;
-  fpCode?: string;
-  owners: WizardFirmOwner[];
+export interface DraftSalonData {
+  code: string;
+  laSalonCode: string;
+  name: string;
+  format: string;
+  sqFt: number;
+  launchDate: string;
+  address: string;
+  district: string;
+  state: string;
+  pincode: string;
+  primaryContact: string;
+  ratecard: string;
 }
 
-export interface WizardAgreementInput {
+export interface DraftOfficialsData {
+  clusterHeadOfficialId: string;
+  regionalHeadOfficialId: string;
+  stateHeadOfficialId: string;
+}
+
+export interface DraftAgreementData {
   validFrom: string;
   validTill: string;
-  contractYear?: number;
-  renewalYear?: number;
-  royaltyTerms?: string;
+  royaltyTerms: string;
 }
 
-export interface WizardSalonInput {
-  firmId: string;
-  salonCode?: string;
-  legacyCode?: string;
-  salonName: string;
-  salonFormat?: string;
-  squareFootage?: number;
-  launchDate?: string;
-  address?: string;
-  district?: string;
-  state?: string;
-  pincode?: string;
-  region?: string;
-  contactNumber1?: string;
-  contactNumber2?: string;
-  email?: string;
-  ratecard?: string;
-  latitude?: number;
-  longitude?: number;
-  operationalStatus?: string;
-  clusterHeadId?: number;
-  regionalHeadId?: number;
-  stateHeadId?: number;
-  agreement?: WizardAgreementInput;
+export type WizardDocumentType = 'PAN_PROOF' | 'AADHAAR_PROOF' | 'GST_CERTIFICATE';
+
+export interface DraftDocumentRecord {
+  documentType: WizardDocumentType;
+  ownerIndex?: number;
+  fileName?: string;
+  uploadedAt?: string;
 }
 
-export interface WizardSalon extends WizardSalonInput {
+export interface FranchiseCreationDraft {
   id: string;
+  createdByUserId: string;
+  currentStep: number;
+  status: DraftStatus;
+  /** null (not []) when the franchisees step hasn't been saved yet — same
+   * null-until-filled pattern as firmData/salonData/etc below. Every consumer must
+   * default to [] before reading .length/.map, never assume it's populated. */
+  franchiseeOwners: DraftFranchiseeOwner[] | null;
+  firmData: DraftFirmData | null;
+  salonData: DraftSalonData | null;
+  officialsData: DraftOfficialsData | null;
+  agreementData: DraftAgreementData | null;
+  documentsData: DraftDocumentRecord[] | null;
+  allRequiredDocumentsPresent: boolean;
+  finalizedFranchiseeIds: string[] | null;
+  finalizedFirmId: string | null;
+  finalizedSalonId: string | null;
+  finalizedAgreementId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export interface WizardCompletion {
-  completionPercentage: number;
+export interface FinalizeResult {
+  draftId: string;
+  franchiseeIds: string[];
+  firmId: string;
+  salonId: string;
+  agreementId: string;
 }
 
-export type WizardDocumentType =
-  | 'OWNER_ID_PROOF'
-  | 'FIRM_GST_CERTIFICATE'
-  | 'SALON_AGREEMENT';
+export const WIZARD_STEPS = ['franchisees', 'firm', 'salon', 'officials', 'agreement', 'documents'] as const;
+export type WizardStepName = (typeof WIZARD_STEPS)[number];
 
-export type WizardDocumentEntity = 'FRANCHISEE' | 'FIRM' | 'SALON';
+export const WIZARD_STEP_LABELS: Record<WizardStepName, string> = {
+  franchisees: 'Franchisee(s)',
+  firm: 'Firm',
+  salon: 'Salon',
+  officials: 'Officials',
+  agreement: 'Agreement',
+  documents: 'Documents',
+};

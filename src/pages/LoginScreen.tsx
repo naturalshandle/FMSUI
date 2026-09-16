@@ -23,7 +23,6 @@ export function LoginScreen() {
     const outcome = await login(email.trim(), password);
     if (outcome === 'AUTHENTICATED') navigate('/');
     else if (outcome === 'MFA_REQUIRED') navigate('/mfa/verify');
-    else if (outcome === 'MFA_SETUP_REQUIRED') navigate('/mfa/setup');
   };
 
   return (

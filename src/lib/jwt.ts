@@ -3,6 +3,7 @@ export interface DecodedToken {
   email: string;
   roles?: string[];
   exp: number;
+  mustChangePassword?: boolean;
 }
 
 export function decodeJwt(token: string): DecodedToken | null {

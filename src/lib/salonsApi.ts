@@ -1,108 +1,115 @@
-import { adaptSalon, request } from '@/lib/api';
+import { request } from '@/lib/api';
+import type { Page } from '@/lib/pagination';
 import type { Salon } from '@/types';
 
-export interface SalonInput {
-  salonCode?: string;
-  legacyCode?: string;
-  salonName: string;
-  salonFormat?: string;
-  squareFootage?: number;
+interface RawSalon {
+  id: number;
+  code?: string;
+  laSalonCode?: string;
+  name: string;
+  format?: string;
+  sqFt?: number;
   launchDate?: string;
   address?: string;
   district?: string;
   state?: string;
   pincode?: string;
   region?: string;
-  contactNumber1?: string;
-  contactNumber2?: string;
-  email?: string;
+  primaryContact?: string;
   ratecard?: string;
-  latitude?: number;
-  longitude?: number;
-  operationalStatus?: string;
-  clusterHeadId?: number;
-  regionalHeadId?: number;
-  stateHeadId?: number;
+  operationalStatus?: Salon['operationalStatus'];
+  currentFirmId?: number;
+  clusterHeadOfficialId?: number;
+  regionalHeadOfficialId?: number;
+  stateHeadOfficialId?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-/**
- * POST /api/v1/firms/:firmId/salons — self-service create. The firm id is nested in
- * the URL path, NOT included in the request body. Genuinely different shape from the
- * admin create below — do not share a payload builder between the two.
- */
-export async function createSalonSelfService(firmId: string, input: SalonInput): Promise<Salon> {
-  const data = await request<Parameters<typeof adaptSalon>[0]>(`/firms/${firmId}/salons`, {
-    method: 'POST',
-    body: input,
-  });
-  return adaptSalon(data);
+function adaptSalon(s: RawSalon): Salon {
+  return {
+    id: String(s.id),
+    code: s.code,
+    laSalonCode: s.laSalonCode,
+    name: s.name,
+    format: s.format,
+    sqFt: s.sqFt,
+    launchDate: s.launchDate,
+    address: s.address,
+    district: s.district,
+    state: s.state,
+    pincode: s.pincode,
+    region: s.region,
+    primaryContact: s.primaryContact,
+    ratecard: s.ratecard,
+    operationalStatus: s.operationalStatus,
+    currentFirmId: s.currentFirmId != null ? String(s.currentFirmId) : undefined,
+    clusterHeadOfficialId: s.clusterHeadOfficialId != null ? String(s.clusterHeadOfficialId) : undefined,
+    regionalHeadOfficialId: s.regionalHeadOfficialId != null ? String(s.regionalHeadOfficialId) : undefined,
+    stateHeadOfficialId: s.stateHeadOfficialId != null ? String(s.stateHeadOfficialId) : undefined,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  };
 }
 
-/**
- * POST /api/v1/admin/salons — admin create. Here firmId travels INSIDE the request
- * body, not the URL. Genuinely different shape from the self-service create above.
- */
-export async function createSalonAdmin(firmId: string, input: SalonInput): Promise<Salon> {
-  const data = await request<Parameters<typeof adaptSalon>[0]>('/admin/salons', {
-    method: 'POST',
-    body: { firmId: Number(firmId), ...input },
-  });
-  return adaptSalon(data);
-}
-
-export async function getSalon(id: string): Promise<Salon> {
-  const data = await request<Parameters<typeof adaptSalon>[0]>(`/salons/${id}`);
-  return adaptSalon(data);
-}
-
-export async function updateSalon(id: string, input: Partial<SalonInput>, asAdmin = false): Promise<Salon> {
-  const path = asAdmin ? `/admin/salons/${id}` : `/salons/${id}`;
-  const data = await request<Parameters<typeof adaptSalon>[0]>(path, { method: 'PATCH', body: input });
-  return adaptSalon(data);
-}
-
-/**
- * POST /api/v1/salons/:id/transfer-firm (self-service) or
- * /api/v1/admin/salons/:id/transfer-firm (admin). Body field is `companyId`, distinct
- * from the `firmId` field used at salon creation despite meaning the same thing.
- */
-export async function transferSalonFirm(salonId: string, companyId: string, reason: string, asAdmin = false): Promise<void> {
-  const path = asAdmin ? `/admin/salons/${salonId}/transfer-firm` : `/salons/${salonId}/transfer-firm`;
-  await request(path, {
-    method: 'POST',
-    body: { companyId: Number(companyId), reason },
-  });
-}
-
-export interface AdminSalonDirectoryParams {
-  operationalStatus?: string;
+export interface SalonSearchParams {
   region?: string;
   state?: string;
+  operationalStatus?: string;
+  search?: string;
   page?: number;
   size?: number;
 }
 
-export interface AdminSalonDirectoryPage {
-  content: Salon[];
-  totalElements: number;
-}
-
-export async function listSalonsAdmin(params: AdminSalonDirectoryParams = {}): Promise<AdminSalonDirectoryPage> {
+/** GET /api/v1/salons?region=&state=&operationalStatus=&search=&page=&size= — spec
+ * §5. `search` matches code, laSalonCode, or name (case-insensitive substring). Any
+ * staff role can view/edit any salon, not just ones they're assigned to — confirmed
+ * spec behavior, not a bug. */
+export async function searchSalons(params: SalonSearchParams = {}): Promise<Page<Salon>> {
   const qs = new URLSearchParams();
-  if (params.operationalStatus) qs.set('operationalStatus', params.operationalStatus);
   if (params.region) qs.set('region', params.region);
   if (params.state) qs.set('state', params.state);
+  if (params.operationalStatus) qs.set('operationalStatus', params.operationalStatus);
+  if (params.search) qs.set('search', params.search);
   qs.set('page', String(params.page ?? 0));
-  qs.set('size', String(params.size ?? 50));
+  qs.set('size', String(params.size ?? 20));
 
-  const data = await request<unknown>(`/admin/salons?${qs.toString()}`);
-  const raw = data as Record<string, unknown>;
-  const contentArr = Array.isArray(data)
-    ? (data as Parameters<typeof adaptSalon>[0][])
-    : (Array.isArray(raw?.content) ? (raw.content as Parameters<typeof adaptSalon>[0][]) : []);
+  const data = await request<Page<RawSalon>>(`/salons?${qs.toString()}`);
+  return { ...data, content: data.content.map(adaptSalon) };
+}
 
-  return {
-    content: contentArr.map(adaptSalon),
-    totalElements: (raw?.totalElements as number) ?? contentArr.length,
-  };
+export async function getSalon(id: string): Promise<Salon> {
+  const data = await request<RawSalon>(`/salons/${id}`);
+  return adaptSalon(data);
+}
+
+export interface UpdateSalonInput {
+  name?: string;
+  format?: string;
+  sqFt?: number;
+  address?: string;
+  district?: string;
+  state?: string;
+  region?: string;
+  pincode?: string;
+  primaryContact?: string;
+  ratecard?: string;
+  operationalStatus?: string;
+}
+
+/** PATCH /api/v1/salons/{id} — no firm field, no official-head-id fields; true
+ * partial update, only send changed fields. */
+export async function updateSalon(id: string, input: UpdateSalonInput): Promise<Salon> {
+  const data = await request<RawSalon>(`/salons/${id}`, { method: 'PATCH', body: input });
+  return adaptSalon(data);
+}
+
+/** POST /api/v1/salons/{id}/transfer — body {newFirmId, reason}. Own dedicated
+ * action, not part of the edit form. */
+export async function transferSalon(id: string, newFirmId: string, reason: string): Promise<Salon> {
+  const data = await request<RawSalon>(`/salons/${id}/transfer`, {
+    method: 'POST',
+    body: { newFirmId: Number(newFirmId), reason },
+  });
+  return adaptSalon(data);
 }

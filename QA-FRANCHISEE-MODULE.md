@@ -221,8 +221,8 @@ Endpoints: `POST/GET /admin/salons/{salonId}/agreements`, `PATCH /admin/agreemen
 > **`Salon.currentRoyaltyPercentage` is not on the wire at all** — confirmed absent
 > from `SalonResponse` on every salon GET/list/create/update endpoint. The entity
 > column exists (`Salon.currentRoyaltyPercentage`, `current_royalty_percentage`) but
-> is only ever written internally by `RoyaltyChangeRequestService.resolve()` when both
-> tiers approve; nothing reads it back out via the Salon API. Rather than guess at a
+> is only ever written internally by `RoyaltyChangeRequestService` when the Admin
+> approves (the final, sequential step); nothing reads it back out via the Salon API. Rather than guess at a
 > field name that provably doesn't exist, the frontend derives "current royalty %" on
 > Salon Detail from the salon's own `/royalty-history`: the `newPercentage` of the most
 > recently resolved `APPROVED` entry (`currentRoyaltyPercentage` memo in
@@ -239,13 +239,20 @@ Endpoints: `POST /royalty-requests`, `GET /salons/{salonId}/royalty-history`,
 `STATE_HEAD` callers, who are blocked from `/admin/**`), `GET /royalty-requests/{id}`,
 `POST /royalty-requests/{id}/state-head-decision`, `POST /royalty-requests/{id}/admin-decision`.
 
-**Approval model:** each request carries two independent, non-blocking decision slots
-(`stateHeadDecision`, `adminDecision`) plus a derived `overallStatus`. Either tier
-rejecting closes the request as REJECTED immediately, regardless of the other tier's
-state. Only when both are APPROVED does `overallStatus` become APPROVED and the
+**Approval model:** sequential, State-Head-first — not two independent parallel
+decisions. `overallStatus` is a 4-state pipeline: `PENDING` (awaiting State Head
+only) → State Head approves → `PENDING_ADMIN` (awaiting Admin only; Admin never sees
+raw `PENDING` requests, and the `/royalty-requests/pending` queue is pre-filtered
+server-side per role) → Admin approves → `APPROVED` (final; only here does the
 salon's actual `currentRoyaltyPercentage` update — the UI never shows the new % as
-live before that. Re-deciding an already-decided tier, or a request that's no longer
-PENDING overall, is a 409 (`isAlreadyClosedError` in `RoyaltyApprovals.tsx`).
+live before that). A rejection at either stage closes the request as `REJECTED`
+immediately and is final; Admin never acts on a request the State Head rejected. When
+a State Head rejection closes the request, `adminDecision` still literally reads
+`"PENDING"` on the wire even though Admin never got a turn — the UI (`SalonDetail.tsx`
+history, `RoyaltyApprovals.tsx`) must omit the Admin stage entirely in that case
+rather than rendering it as an outstanding decision. Acting on a request that's no
+longer at the caller's stage (already decided, or not there yet) is a 409
+(`isAlreadyClosedError` in `RoyaltyApprovals.tsx`).
 
 **Display names:** the response has no `salonName`/`franchiseeName`/`requestedByName` —
 IDs only. `SalonDetail.tsx` resolves franchisee names from the current firm's already-
@@ -268,7 +275,11 @@ than N+1 client-side lookups at higher volumes.
    - Confirm **Salon** and **Current %** are read-only and cannot be edited.
 3. Enter a **New %** and a **Why** (reason); optionally fill **Instructed by**. Submit.
    - Expect: success toast, modal closes, the new request appears at the top of
-     **Royalty History** with status "Pending" (State Head: Pending · Admin: Pending).
+     **Royalty History** with the "Awaiting State Head" pill (`overallStatus: PENDING`).
+4. Log in as the salon's assigned State Head and open **Royalty Approvals**.
+   - Expect: the new request appears in the queue. Log in as an Admin (`SUPER_ADMIN`/
+     `CORPORATE_ADMIN`) instead and open **Royalty Approvals** — expect it does
+     **not** appear there yet (Admin only sees `PENDING_ADMIN` requests).
 
 ### Journey 2 — RM/CM submits as the wrong official (403)
 
@@ -283,64 +294,78 @@ than N+1 client-side lookups at higher volumes.
    **Royalty Approvals** appears in the nav (and does *not* appear for a Regional
    Manager / Cluster Manager without that role).
 2. Open **Royalty Approvals** — confirm the pending request shows salon, franchisee,
-   current → new %, reason, instructed by, requested by, and date.
+   current → new %, reason, instructed by, requested by, and date, with a single
+   Approve/Reject action (no "other party's decision is still pending" messaging).
 3. Click **Approve**.
-   - Expect: success toast, the item drops out of the pending list, and (checking back
-     on the salon's Royalty History) "State Head: Approved" now shows while "Admin"
-     remains Pending and overall status is still Pending.
+   - Expect: success toast, the item drops out of the State Head's pending list.
+   - Confirm the salon's **Current Royalty** on Salon Detail is still unchanged.
+   - Confirm the request now shows the "Awaiting Admin" pill (`overallStatus:
+     PENDING_ADMIN`) on Royalty History, and now appears in an **Admin's** Royalty
+     Approvals queue (it did not before this step).
 
 ### Journey 4 — State Head rejects
 
-1. From **Royalty Approvals**, click **Reject** on a pending request.
+1. From **Royalty Approvals** (as State Head), click **Reject** on a pending request.
    - Expect: a reason is required to submit (matching the Agreement-termination /
      Firm-owner-removal reason-modal pattern) — the Reject button stays disabled until
      text is entered.
 2. Submit with a reason.
    - Expect: info toast, item drops out of the pending list, and Royalty History shows
      overall status "Rejected" with the State Head's reason visible.
+   - Confirm the detail/history view shows **no Admin stage at all** for this request
+     (not an "Admin: Pending" row) — Admin never got a turn.
+   - Confirm the request never appears in any Admin's Royalty Approvals queue.
 
 ### Journey 5 — Admin approves / rejects
 
-1. Repeat Journeys 3–4 logged in as a `SUPER_ADMIN` or `CORPORATE_ADMIN` user instead
-   of a State Head.
-   - Expect: same UI and behavior, but the app calls the admin-decision endpoint
-     instead of the state-head-decision endpoint (verify via network tab).
+1. Take a request that's already `PENDING_ADMIN` (State Head approved it in Journey 3).
+   Log in as a `SUPER_ADMIN` or `CORPORATE_ADMIN` user and open **Royalty Approvals**.
+   - Expect: the request appears with a single Approve/Reject action; the app calls
+     the admin-decision endpoint (verify via network tab).
+2. Click **Approve**.
+   - Expect: success toast, `overallStatus` becomes `APPROVED`, and — only at this
+     step — the salon's **Current Royalty** on Salon Detail updates to the new
+     percentage.
+3. Repeat with a different `PENDING_ADMIN` request and click **Reject** (reason
+   required) instead.
+   - Expect: info toast, `overallStatus` becomes `REJECTED`, salon percentage
+     unchanged, Admin's reason visible in history alongside the State Head's earlier
+     approval.
 
-### Journey 6 — Independent, non-blocking decisions + already-closed race condition
+### Journey 6 — Wrong-stage actions are rejected with a clear message
 
-1. Confirm a State Head can act on a request regardless of whether the Admin tier has
-   already decided (and vice versa) — neither UI hides or disables its own action
-   waiting on the other tier.
-2. Get a request pending on both tiers. Have one approve/reject it, then — before
-   refreshing the other party's queue — attempt to approve/reject the same request
-   from the other party's still-stale queue (or retry the same decision twice quickly).
-   - Expect: HTTP 409 surfaces as "This request was already resolved by the other
-     approver," not a generic failure.
-3. Reject at either tier while the other tier is still Pending.
-   - Expect: `overallStatus` immediately becomes REJECTED; the salon's Current Royalty
-     is unchanged; the other tier's decision, if it comes in later, doesn't reopen or
-     re-close the request.
-4. Approve at both tiers (in either order).
-   - Expect: only after *both* are APPROVED does `overallStatus` flip to APPROVED and
-     the salon's **Current Royalty** value on Salon Detail actually update to the new
-     percentage — confirm it does NOT show the new % as live at any point before that.
+1. As an Admin, confirm a raw `PENDING` request (State Head hasn't acted yet) never
+   appears in the Admin's Royalty Approvals queue at all — there is no way to reach
+   it from that screen.
+2. Get a `PENDING_ADMIN` request. Have the Admin approve/reject it, then — before
+   refreshing another Admin's still-stale queue — attempt to decide the same request
+   again from that stale queue (or retry the same decision twice quickly).
+   - Expect: HTTP 409 surfaces as "This request is no longer awaiting your decision,"
+     not a generic failure and not "resolved by the other approver."
+3. Confirm neither screen ever shows both a State Head action and an Admin action as
+   simultaneously available on the same request — only one decision-maker is ever
+   active at a time.
 
 ### Journey 7 — History shows a mix of resolved requests, with resolved names
 
 1. On a salon with several past royalty requests in different end states (approved,
    rejected, still pending), confirm **Royalty History** lists all of them, newest
    first, and does **not** hide rejected ones.
-2. Confirm each history row shows old % → new %, overall status pill, both individual
-   decision states, the franchisee's resolved name (not just an id), requested-by
-   resolved to a name where the requester is a known Official, and — for resolved
-   requests — both decision reasons with the deciding user's resolved name.
+2. Confirm each history row shows old % → new %, the overall status pill (using the
+   friendly label — "Awaiting State Head" / "Awaiting Admin" / "Approved" /
+   "Rejected", not the raw enum), the franchisee's resolved name (not just an id),
+   requested-by resolved to a name where the requester is a known Official, and the
+   decision sequence rendered as a timeline (submitted → State Head decision →
+   Admin decision only if the State Head approved) with each stage's reason and the
+   deciding user's resolved name — never a placeholder "Admin: Pending" row for a
+   request the State Head rejected.
 
 ### Journey 8 — Current Royalty derived from history, not SalonResponse
 
 1. On a salon with **no** approved royalty request yet, confirm **Current Royalty**
    and the request modal's read-only **Current %** both show "Not set".
-2. Get one request through to `overallStatus === 'APPROVED'` (both tiers approve).
-   Reload Salon Detail.
+2. Get one request through to `overallStatus === 'APPROVED'` (State Head approves,
+   then Admin approves). Reload Salon Detail.
    - Expect: **Current Royalty** now shows that request's `newPercentage`, sourced
      from Royalty History, not from any field on the Salon record itself.
 3. Submit and approve a second, different percentage afterward.

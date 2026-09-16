@@ -10,7 +10,7 @@ const TOTP_PATTERN = /^\d{6}$/;
 
 export function MfaVerifyScreen() {
   const navigate = useNavigate();
-  const { pendingMfa, verifyMfaLogin, cancelMfa } = useApp();
+  const { pendingMfa, verifyMfaLogin, cancelMfa, redirectToMfaSetup } = useApp();
   const [totp, setTotp] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
@@ -37,9 +37,17 @@ export function MfaVerifyScreen() {
       await verifyMfaLogin(totp);
       navigate('/');
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
+      if (err instanceof ApiError && err.status === 409) {
+        // "MFA setup has not been completed for this account yet" — expected
+        // first-time-enrollment branch per spec §0.2.2, not shown as an error.
+        redirectToMfaSetup();
+        navigate('/mfa/setup', { replace: true });
+      } else if (err instanceof ApiError && err.status === 401 && err.message === 'Invalid or expired token') {
         setExpired(true);
-        setError('Your verification session has expired. Please log in again.');
+        setError('Your session expired, please log in again.');
+      } else if (err instanceof ApiError && err.status === 401) {
+        setError('Incorrect code. Please try again.');
+        setTotp('');
       } else {
         setError(err instanceof Error ? err.message : 'Verification failed. Please try again.');
       }

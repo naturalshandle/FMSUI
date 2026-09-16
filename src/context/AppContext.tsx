@@ -3,7 +3,7 @@ import type { AdminUser, CurrentUser } from '@/types';
 import * as api from '@/lib/api';
 import { decodeJwt } from '@/lib/jwt';
 
-export type LoginOutcome = 'AUTHENTICATED' | 'MFA_REQUIRED' | 'MFA_SETUP_REQUIRED' | 'ERROR';
+export type LoginOutcome = 'AUTHENTICATED' | 'MFA_REQUIRED' | 'ERROR';
 
 export interface PendingMfa {
   token: string;
@@ -13,22 +13,35 @@ export interface PendingMfa {
 interface AppState {
   // Auth
   currentUser: CurrentUser | null;
+  mustChangePassword: boolean;
   authInitializing: boolean;
   authError: string | null;
   authLoading: boolean;
   login: (email: string, password: string) => Promise<LoginOutcome>;
   logout: () => void;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  /** Clears the mustChangePassword gate after the user has seen the success
+   * confirmation — kept separate from changePassword so the confirmation screen
+   * has a moment to render before RequireAuth swaps back to the normal app. */
+  acknowledgePasswordChanged: () => void;
 
   // MFA
   pendingMfa: PendingMfa | null;
   cancelMfa: () => void;
+  /** Switches the pending MFA flow from VERIFY to SETUP, carrying the same mfaToken
+   * forward — the response to a 409 "MFA setup has not been completed" from
+   * /auth/mfa/verify (spec §0.2.2), never shown to the user as an error. */
+  redirectToMfaSetup: () => void;
   fetchMfaSetupInfo: (bearerToken?: string) => Promise<api.MfaSetupInfo>;
-  completeMfaSetup: (secret: string, code: string, bearerToken?: string) => Promise<api.EnableMfaResult>;
+  /** POST /auth/mfa/enable — confirms MFA is now enabled but returns no tokens.
+   * Per spec §0.2.4, the caller must follow up with a fresh verifyMfaLogin() call
+   * (a newly-entered code) to actually complete login. Does not clear pendingMfa. */
+  enableMfaSetup: (code: string) => Promise<string>;
   verifyMfaLogin: (code: string) => Promise<void>;
 
-  // Admin users (session-scoped — backend has no list endpoint yet)
+  // Admin users (session-scoped — backend has no list endpoint per spec §2)
   adminUsers: AdminUser[];
-  createAdminUser: (user: { fullName: string; email: string; phone?: string; roleName: string }) => Promise<void>;
+  createAdminUser: (user: { email: string; roleName: string }) => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -39,7 +52,7 @@ export function useApp() {
   return ctx;
 }
 
-function userFromStoredToken(): CurrentUser | null {
+function userFromStoredToken(): { user: CurrentUser; mustChangePassword: boolean } | null {
   const token = api.getAccessToken();
   if (!token) return null;
   const decoded = decodeJwt(token);
@@ -48,11 +61,15 @@ function userFromStoredToken(): CurrentUser | null {
     api.clearTokens();
     return null;
   }
-  return { userId: decoded.sub, email: decoded.email, roles: decoded.roles ?? [] };
+  return {
+    user: { userId: decoded.sub, email: decoded.email, roles: decoded.roles ?? [] },
+    mustChangePassword: decoded.mustChangePassword ?? false,
+  };
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [authInitializing, setAuthInitializing] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
@@ -60,18 +77,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
 
+  const applySession = useCallback(() => {
+    const restored = userFromStoredToken();
+    setCurrentUser(restored?.user ?? null);
+    setMustChangePassword(restored?.mustChangePassword ?? false);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const restored = await api.restoreSession();
       if (cancelled) return;
-      setCurrentUser(restored ? userFromStoredToken() : null);
+      if (restored) applySession();
       setAuthInitializing(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applySession]);
 
   const login = useCallback(async (email: string, password: string): Promise<LoginOutcome> => {
     setAuthError(null);
@@ -82,12 +105,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setPendingMfa({ token: result.mfaToken, kind: 'VERIFY' });
         return 'MFA_REQUIRED';
       }
-      if (result.status === 'MFA_SETUP_REQUIRED') {
-        setPendingMfa({ token: result.mfaToken, kind: 'SETUP' });
-        return 'MFA_SETUP_REQUIRED';
-      }
       api.setTokens(result.tokens.accessToken, result.tokens.refreshToken);
-      setCurrentUser(userFromStoredToken());
+      applySession();
       return 'AUTHENTICATED';
     } catch (err) {
       setAuthError(err instanceof api.ApiError ? err.message : 'Unable to sign in. Please try again.');
@@ -95,18 +114,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setAuthLoading(false);
     }
-  }, []);
+  }, [applySession]);
 
   const logout = useCallback(() => {
     void api.logout();
     api.clearTokens();
     setCurrentUser(null);
+    setMustChangePassword(false);
     setPendingMfa(null);
+  }, []);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    await api.changePassword(currentPassword, newPassword);
+  }, []);
+
+  const acknowledgePasswordChanged = useCallback(() => {
+    // The current access token was issued before the flag flipped server-side;
+    // unblock the gate locally rather than waiting on a fresh token.
+    setMustChangePassword(false);
   }, []);
 
   const cancelMfa = useCallback(() => {
     setPendingMfa(null);
     setAuthError(null);
+  }, []);
+
+  const redirectToMfaSetup = useCallback(() => {
+    setPendingMfa((prev) => (prev ? { token: prev.token, kind: 'SETUP' } : prev));
   }, []);
 
   const fetchMfaSetupInfo = useCallback(
@@ -118,20 +152,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [pendingMfa],
   );
 
-  const completeMfaSetup = useCallback(
-    async (secret: string, code: string, bearerToken?: string) => {
-      const token = bearerToken ?? pendingMfa?.token;
+  const enableMfaSetup = useCallback(
+    async (code: string) => {
+      const token = pendingMfa?.token;
       if (!token) throw new api.ApiError(0, 'No MFA session in progress.');
-      const result = await api.enableMfa(token, secret, code);
-      if (result.status === 'TOKENS') {
-        api.setTokens(result.tokens.accessToken, result.tokens.refreshToken);
-        setCurrentUser(userFromStoredToken());
-        setPendingMfa(null);
-      } else if (pendingMfa) {
-        // First-login setup with no tokens issued (shouldn't normally happen) — fall back to login screen.
-        setPendingMfa(null);
-      }
-      return result;
+      const result = await api.enableMfa(token, code);
+      return result.message;
     },
     [pendingMfa],
   );
@@ -141,14 +167,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!pendingMfa) throw new api.ApiError(0, 'No MFA session in progress.');
       const tokens = await api.verifyMfa(pendingMfa.token, code);
       api.setTokens(tokens.accessToken, tokens.refreshToken);
-      setCurrentUser(userFromStoredToken());
+      applySession();
       setPendingMfa(null);
     },
-    [pendingMfa],
+    [pendingMfa, applySession],
   );
 
   const createAdminUser = useCallback(
-    async (user: { fullName: string; email: string; phone?: string; roleName: string }) => {
+    async (user: { email: string; roleName: string }) => {
       const created = await api.createAdminUser(user);
       setAdminUsers((prev) => [...prev, created]);
     },
@@ -159,15 +185,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider
       value={{
         currentUser,
+        mustChangePassword,
         authInitializing,
         authError,
         authLoading,
         login,
         logout,
+        changePassword,
+        acknowledgePasswordChanged,
         pendingMfa,
         cancelMfa,
+        redirectToMfaSetup,
         fetchMfaSetupInfo,
-        completeMfaSetup,
+        enableMfaSetup,
         verifyMfaLogin,
         adminUsers,
         createAdminUser,

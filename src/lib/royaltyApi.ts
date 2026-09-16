@@ -1,23 +1,19 @@
 import { request } from '@/lib/api';
-import type { RoyaltyDecisionState, RoyaltyRequest } from '@/types';
+import type { RoyaltyDecisionState, RoyaltyOverallStatus, RoyaltyRequest } from '@/types';
+import type { StatusBucket } from '@/components/ui/StatusBadge';
 
-/**
- * Confirmed against FMSBE backend source directly (not the Postman collection, which
- * doesn't cover this module). Response is IDs-only — no salonName/franchiseeName/
- * requestedByName on the wire; components resolve display names from data they
- * already have (salon context, loaded Officials list, etc.) rather than guessing a
- * field that doesn't exist.
- */
+/** Response is IDs-only, no salonName/requestedByName on the wire — spec §8. */
 interface RawRoyaltyRequest {
   id: number;
   salonId: number;
-  franchiseeId: number;
   currentPercentage: number | null;
   newPercentage: number;
+  newRoyaltyType?: string;
   reason: string;
   instructedBy: string | null;
   requestedBy: number;
-  overallStatus: RoyaltyDecisionState;
+  skippedStateHeadStep?: boolean;
+  overallStatus: RoyaltyOverallStatus;
   stateHeadDecision: RoyaltyDecisionState;
   stateHeadDecidedBy: number | null;
   stateHeadDecidedAt: string | null;
@@ -34,12 +30,13 @@ function adaptRoyaltyRequest(r: RawRoyaltyRequest): RoyaltyRequest {
   return {
     id: String(r.id),
     salonId: String(r.salonId),
-    franchiseeId: String(r.franchiseeId),
     currentPercentage: r.currentPercentage,
     newPercentage: r.newPercentage,
+    newRoyaltyType: r.newRoyaltyType,
     reason: r.reason,
     instructedBy: r.instructedBy ?? undefined,
     requestedBy: String(r.requestedBy),
+    skippedStateHeadStep: r.skippedStateHeadStep,
     overallStatus: r.overallStatus,
     stateHeadDecision: r.stateHeadDecision,
     stateHeadDecidedBy: r.stateHeadDecidedBy != null ? String(r.stateHeadDecidedBy) : undefined,
@@ -54,58 +51,43 @@ function adaptRoyaltyRequest(r: RawRoyaltyRequest): RoyaltyRequest {
   };
 }
 
-function adaptList(data: unknown): RoyaltyRequest[] {
-  const arr = Array.isArray(data)
-    ? (data as RawRoyaltyRequest[])
-    : ((data as { content?: RawRoyaltyRequest[] })?.content ?? []);
-  return arr.map(adaptRoyaltyRequest);
+function adaptList(data: RawRoyaltyRequest[]): RoyaltyRequest[] {
+  return data.map(adaptRoyaltyRequest);
 }
 
-export interface CreateRoyaltyRequestInput {
-  salonId: string;
-  franchiseeId: string;
+export interface SubmitRoyaltyRequestInput {
   newPercentage: number;
+  newRoyaltyType: string;
   reason: string;
   instructedBy?: string;
 }
 
 /**
- * POST /api/v1/royalty-requests — REGIONAL_MANAGER/CLUSTER_MANAGER only; 403s if the
- * caller isn't the assigned RM/CM for this salon. No currentPercentage field is sent —
- * the backend snapshots it server-side from the salon's live value at submit time.
+ * POST /api/v1/salons/{salonId}/royalty-requests — RM/CM/SH only, and only for the
+ * assigned salon; 403s otherwise. No franchiseeId in the body — requests are
+ * salon-scoped. If the submitter IS the salon's assigned State Head, the response's
+ * `skippedStateHeadStep` is true and the request starts at PENDING_ADMIN directly.
  */
-export async function createRoyaltyRequest(input: CreateRoyaltyRequestInput): Promise<RoyaltyRequest> {
-  const data = await request<RawRoyaltyRequest>('/royalty-requests', {
+export async function submitRoyaltyRequest(salonId: string, input: SubmitRoyaltyRequestInput): Promise<RoyaltyRequest> {
+  const data = await request<RawRoyaltyRequest>(`/salons/${salonId}/royalty-requests`, {
     method: 'POST',
-    body: {
-      salonId: Number(input.salonId),
-      franchiseeId: Number(input.franchiseeId),
-      newPercentage: input.newPercentage,
-      reason: input.reason,
-      instructedBy: input.instructedBy || undefined,
-    },
+    body: input,
   });
   return adaptRoyaltyRequest(data);
 }
 
-/**
- * GET /api/v1/salons/:salonId/royalty-history — full audit trail for one salon, newest
- * first, including rejected/resolved requests. Allowed for admins, the salon's assigned
- * RM/CM, or its assigned State Head.
- */
+/** GET /api/v1/salons/{salonId}/royalty-requests — plain array, unscoped, no
+ * pagination, ordered newest-first. */
 export async function listRoyaltyHistory(salonId: string): Promise<RoyaltyRequest[]> {
-  const data = await request<unknown>(`/salons/${salonId}/royalty-history`);
+  const data = await request<RawRoyaltyRequest[]>(`/salons/${salonId}/royalty-requests`);
   return adaptList(data);
 }
 
-/**
- * GET /api/v1/royalty-requests/pending — NOT under /admin/**; this endpoint must serve
- * STATE_HEAD callers too, and /admin/** is blanket-gated to SUPER_ADMIN/CORPORATE_ADMIN
- * only. Pre-scoped server-side to the caller's own outstanding decisions. Standard
- * Spring Page<> params apply.
- */
-export async function listPendingRoyaltyApprovals(page = 0, size = 20): Promise<RoyaltyRequest[]> {
-  const data = await request<unknown>(`/royalty-requests/pending?page=${page}&size=${size}`);
+/** GET /api/v1/royalty-requests/pending — plain array, no pagination. Response set
+ * is role-dependent server-side (Admins get PENDING_ADMIN, everyone else gets only
+ * their own PENDING_STATE_HEAD) — don't pass a role param. */
+export async function listPendingRoyaltyRequests(): Promise<RoyaltyRequest[]> {
+  const data = await request<RawRoyaltyRequest[]>('/royalty-requests/pending');
   return adaptList(data);
 }
 
@@ -114,35 +96,44 @@ export async function getRoyaltyRequest(id: string): Promise<RoyaltyRequest> {
   return adaptRoyaltyRequest(data);
 }
 
-export type RoyaltyDeciderRole = 'STATE_HEAD' | 'ADMIN';
-
-/**
- * POST /api/v1/royalty-requests/:id/state-head-decision (STATE_HEAD, must be the
- * salon's assigned State Head) or .../admin-decision (SUPER_ADMIN/CORPORATE_ADMIN) —
- * same body shape either way: { approved, reason }. `reason` is required by the
- * backend (400) when approved is false; optional otherwise. Each tier's decision is a
- * one-shot: re-deciding an already-decided tier, or deciding a request whose
- * overallStatus is no longer PENDING, gets a 409.
- */
-export async function decideRoyaltyRequest(
-  id: string,
-  deciderRole: RoyaltyDeciderRole,
-  approved: boolean,
-  reason?: string,
-): Promise<RoyaltyRequest> {
-  const path =
-    deciderRole === 'STATE_HEAD'
-      ? `/royalty-requests/${id}/state-head-decision`
-      : `/royalty-requests/${id}/admin-decision`;
-  const data = await request<RawRoyaltyRequest>(path, {
+/** POST /api/v1/royalty-requests/{id}/state-head-recommendation — body
+ * {approved, reason}, reason required for BOTH approve and reject. Advisory only:
+ * always routes to PENDING_ADMIN next regardless of approve/reject. */
+export async function submitStateHeadRecommendation(id: string, approved: boolean, reason: string): Promise<RoyaltyRequest> {
+  const data = await request<RawRoyaltyRequest>(`/royalty-requests/${id}/state-head-recommendation`, {
     method: 'POST',
-    body: { approved, reason: reason || undefined },
+    body: { approved, reason },
   });
   return adaptRoyaltyRequest(data);
 }
 
-export function royaltyStatusBadgeKind(status: RoyaltyDecisionState): 'VERIFIED' | 'SUBMITTED' | 'REJECTED' {
-  if (status === 'APPROVED') return 'VERIFIED';
-  if (status === 'REJECTED') return 'REJECTED';
-  return 'SUBMITTED';
+/** POST /api/v1/admin/royalty-requests/{id}/decision — body {approved, reason},
+ * terminal. No self-review-conflict check exists server-side (confirmed) — don't
+ * build a UI block for it. */
+export async function submitAdminDecision(id: string, approved: boolean, reason: string): Promise<RoyaltyRequest> {
+  const data = await request<RawRoyaltyRequest>(`/admin/royalty-requests/${id}/decision`, {
+    method: 'POST',
+    body: { approved, reason },
+  });
+  return adaptRoyaltyRequest(data);
+}
+
+export function royaltyStatusBucket(status: RoyaltyOverallStatus): StatusBucket {
+  if (status === 'APPROVED') return 'positive';
+  if (status === 'REJECTED') return 'negative';
+  return 'pending';
+}
+
+/** Human label for overallStatus — the sequential pipeline state, not a raw enum dump. */
+export function royaltyStatusLabel(status: RoyaltyOverallStatus): string {
+  switch (status) {
+    case 'PENDING':
+      return 'Awaiting State Head';
+    case 'PENDING_ADMIN':
+      return 'Awaiting Admin';
+    case 'APPROVED':
+      return 'Approved';
+    case 'REJECTED':
+      return 'Rejected';
+  }
 }

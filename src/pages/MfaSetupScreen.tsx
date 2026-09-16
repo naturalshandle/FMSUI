@@ -6,20 +6,21 @@ import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { useToast } from '@/components/ui/Toast';
 
 const TOTP_PATTERN = /^\d{6}$/;
 
 export function MfaSetupScreen() {
   const navigate = useNavigate();
-  const { pendingMfa, fetchMfaSetupInfo, completeMfaSetup, cancelMfa } = useApp();
-  const { showToast } = useToast();
+  const { pendingMfa, fetchMfaSetupInfo, enableMfaSetup, verifyMfaLogin, cancelMfa } = useApp();
 
   const [secret, setSecret] = useState<string | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // 'enable' collects the code to turn MFA on; 'verify' collects a freshly-entered
+  // code to actually complete login — enable itself returns no tokens (spec §0.2.4).
+  const [phase, setPhase] = useState<'enable' | 'verify'>('enable');
   const [totp, setTotp] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [expired, setExpired] = useState(false);
@@ -32,7 +33,7 @@ export function MfaSetupScreen() {
       .then(async (info) => {
         if (cancelled) return;
         setSecret(info.secret);
-        const dataUrl = await QRCode.toDataURL(info.qrCodeUri, { width: 220, margin: 1 });
+        const dataUrl = await QRCode.toDataURL(info.otpAuthUri, { width: 220, margin: 1 });
         if (!cancelled) setQrDataUrl(dataUrl);
       })
       .catch((err) => {
@@ -72,7 +73,6 @@ export function MfaSetupScreen() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!secret) return;
     if (!TOTP_PATTERN.test(totp)) {
       setSubmitError('Enter the 6-digit code from your authenticator app.');
       return;
@@ -80,19 +80,28 @@ export function MfaSetupScreen() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const result = await completeMfaSetup(secret, totp);
-      if (result.status === 'TOKENS') {
-        navigate('/');
+      if (phase === 'enable') {
+        await enableMfaSetup(totp);
+        setTotp('');
+        setPhase('verify');
       } else {
-        showToast('success', result.message);
-        navigate('/login', { replace: true });
+        await verifyMfaLogin(totp);
+        navigate('/');
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setExpired(true);
-        setSubmitError('Your setup session has expired. Please log in again.');
+        if (err.message === 'Invalid or expired token') {
+          setExpired(true);
+          setSubmitError('Your setup session has expired. Please log in again.');
+        } else {
+          setSubmitError('Incorrect code. Please try again.');
+          setTotp('');
+        }
+      } else if (err instanceof ApiError && err.status === 400) {
+        setSubmitError('Incorrect code, please try again.');
+        setTotp('');
       } else {
-        setSubmitError(err instanceof Error ? err.message : 'Could not enable MFA. Please try again.');
+        setSubmitError(err instanceof Error ? err.message : 'Could not complete MFA setup. Please try again.');
       }
     } finally {
       setSubmitting(false);
@@ -109,11 +118,22 @@ export function MfaSetupScreen() {
           <span className="text-lg font-bold text-ink">Naturals FMS</span>
         </div>
 
-        <h2 className="text-2xl font-bold text-ink mb-1.5">Set up two-factor authentication</h2>
-        <p className="text-sm text-ink-secondary mb-6">
-          Your role requires MFA. Scan the QR code with an authenticator app (e.g. Google Authenticator, Authy),
-          then enter the 6-digit code to finish setup.
-        </p>
+        {phase === 'enable' ? (
+          <>
+            <h2 className="text-2xl font-bold text-ink mb-1.5">Set up two-factor authentication</h2>
+            <p className="text-sm text-ink-secondary mb-6">
+              Your role requires MFA. Scan the QR code with an authenticator app (e.g. Google Authenticator, Authy),
+              then enter the 6-digit code to finish setup.
+            </p>
+          </>
+        ) : (
+          <>
+            <h2 className="text-2xl font-bold text-ink mb-1.5">MFA enabled — one more code</h2>
+            <p className="text-sm text-ink-secondary mb-6">
+              Enter a fresh 6-digit code from your authenticator app to finish signing in.
+            </p>
+          </>
+        )}
 
         {loadError && !qrDataUrl ? (
           <div className="space-y-4">
@@ -126,31 +146,39 @@ export function MfaSetupScreen() {
               </Button>
             )}
           </div>
-        ) : !qrDataUrl ? (
+        ) : phase === 'enable' && !qrDataUrl ? (
           <div className="flex justify-center py-10">
             <span className="h-6 w-6 border-2 border-brand-200 border-t-brand-600 rounded-full animate-spin" />
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="flex justify-center">
-              <img src={qrDataUrl} alt="Scan this QR code with your authenticator app" className="rounded-xl border border-brand-100" />
-            </div>
+            {phase === 'enable' && qrDataUrl && (
+              <>
+                <div className="flex justify-center">
+                  <img
+                    src={qrDataUrl}
+                    alt="Scan this QR code with your authenticator app"
+                    className="rounded-xl border border-brand-100"
+                  />
+                </div>
 
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-ink-secondary">Can't scan? Enter this code manually:</p>
-              <button
-                type="button"
-                onClick={handleCopySecret}
-                className="flex w-full items-center justify-between gap-2 rounded-xl bg-brand-50/50 border border-brand-100 px-4 py-2.5 text-sm font-mono text-ink hover:border-brand-300 transition-colors"
-              >
-                <span className="truncate">{secret}</span>
-                {copied ? (
-                  <Check className="h-4 w-4 text-status-verified shrink-0" />
-                ) : (
-                  <Copy className="h-4 w-4 text-ink-secondary shrink-0" />
-                )}
-              </button>
-            </div>
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-ink-secondary">Can't scan? Enter this code manually:</p>
+                  <button
+                    type="button"
+                    onClick={handleCopySecret}
+                    className="flex w-full items-center justify-between gap-2 rounded-xl bg-brand-50/50 border border-brand-100 px-4 py-2.5 text-sm font-mono text-ink hover:border-brand-300 transition-colors"
+                  >
+                    <span className="truncate">{secret}</span>
+                    {copied ? (
+                      <Check className="h-4 w-4 text-status-verified shrink-0" />
+                    ) : (
+                      <Copy className="h-4 w-4 text-ink-secondary shrink-0" />
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
 
             {submitError && (
               <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-status-rejected">
@@ -179,11 +207,11 @@ export function MfaSetupScreen() {
                   {submitting ? (
                     <span className="flex items-center gap-2">
                       <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Enabling...
+                      {phase === 'enable' ? 'Enabling...' : 'Verifying...'}
                     </span>
                   ) : (
                     <span className="flex items-center gap-2">
-                      Enable MFA
+                      {phase === 'enable' ? 'Enable MFA' : 'Verify'}
                       <ArrowRight className="h-4 w-4" />
                     </span>
                   )}

@@ -9,7 +9,6 @@ import {
   Repeat,
   Store,
   FileText,
-  Plus,
   RefreshCw,
   Ban,
   ChevronDown,
@@ -17,26 +16,27 @@ import {
   Percent,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select, Textarea } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
-import { getSalon, transferSalonFirm } from '@/lib/salonsApi';
-import { getFirm, listFirmsAdmin } from '@/lib/firmsApi';
+import { StatusBadge, type StatusBucket } from '@/components/ui/StatusBadge';
+import { DocumentsPanel } from '@/components/domain/DocumentsPanel';
+import { SalonAuditsSection } from '@/components/domain/SalonAuditsSection';
+import { getSalon, transferSalon } from '@/lib/salonsApi';
+import { searchFirms } from '@/lib/firmsApi';
 import { listOfficials } from '@/lib/officialsApi';
+import { searchAgreements, updateAgreement, renewAgreement, terminateAgreement } from '@/lib/agreementsApi';
 import {
-  listAgreements,
-  createAgreement,
-  updateAgreement,
-  renewAgreement,
-  terminateAgreement,
-} from '@/lib/agreementsApi';
-import { createRoyaltyRequest, listRoyaltyHistory, royaltyStatusBadgeKind } from '@/lib/royaltyApi';
+  submitRoyaltyRequest,
+  listRoyaltyHistory,
+  royaltyStatusBucket,
+  royaltyStatusLabel,
+} from '@/lib/royaltyApi';
 import { ApiError } from '@/lib/api';
-import type { Agreement, Firm, Official, RoyaltyRequest, Salon } from '@/types';
+import type { Agreement, Firm, Official, RoyaltyRequest, Salon, AgreementStatus } from '@/types';
 
 function formatDate(iso?: string): string {
   if (!iso) return '—';
@@ -45,7 +45,11 @@ function formatDate(iso?: string): string {
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-const emptyAgreementForm = { validFrom: '', validTill: '', contractYear: '', renewalYear: '', royaltyTerms: '' };
+const agreementStatusBucket: Record<AgreementStatus, StatusBucket> = {
+  ACTIVE: 'positive',
+  SUPERSEDED: 'closed',
+  TERMINATED: 'negative',
+};
 
 export function SalonDetail() {
   const { id } = useParams();
@@ -66,11 +70,11 @@ export function SalonDetail() {
   const [agreements, setAgreements] = useState<Agreement[]>([]);
   const [agreementsLoading, setAgreementsLoading] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [createModal, setCreateModal] = useState(false);
   const [editModal, setEditModal] = useState<Agreement | null>(null);
+  const [editRoyaltyTerms, setEditRoyaltyTerms] = useState('');
   const [renewModal, setRenewModal] = useState<Agreement | null>(null);
+  const [renewForm, setRenewForm] = useState({ validFrom: '', newValidTill: '', royaltyTerms: '' });
   const [terminateModal, setTerminateModal] = useState<Agreement | null>(null);
-  const [agreementForm, setAgreementForm] = useState(emptyAgreementForm);
   const [terminateReason, setTerminateReason] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -78,9 +82,7 @@ export function SalonDetail() {
   const [royaltyHistory, setRoyaltyHistory] = useState<RoyaltyRequest[]>([]);
   const [royaltyHistoryLoading, setRoyaltyHistoryLoading] = useState(true);
   const [royaltyModal, setRoyaltyModal] = useState(false);
-  const [currentFirmOwners, setCurrentFirmOwners] = useState<Firm['owners']>([]);
-  const [royaltyFranchiseeId, setRoyaltyFranchiseeId] = useState('');
-  const [royaltyForm, setRoyaltyForm] = useState({ newPercentage: '', reason: '', instructedBy: '' });
+  const [royaltyForm, setRoyaltyForm] = useState({ newPercentage: '', newRoyaltyType: '', reason: '', instructedBy: '' });
   const [royaltyBusy, setRoyaltyBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -96,8 +98,8 @@ export function SalonDetail() {
   const loadAgreements = useCallback(() => {
     if (!id) return;
     setAgreementsLoading(true);
-    listAgreements(id, true)
-      .then(setAgreements)
+    searchAgreements({ salonId: id, size: 100 })
+      .then((page) => setAgreements(page.content))
       .catch(() => setAgreements([]))
       .finally(() => setAgreementsLoading(false));
   }, [id]);
@@ -118,32 +120,17 @@ export function SalonDetail() {
   }, [load, loadAgreements, loadRoyaltyHistory]);
 
   useEffect(() => {
-    listOfficials({ size: 500 })
+    listOfficials({ size: 200 })
       .then((page) => setOfficials(page.content))
       .catch(() => setOfficials([]));
   }, []);
 
   useEffect(() => {
     if (!transferModal) return;
-    listFirmsAdmin({ size: 200 })
+    searchFirms({ size: 100 })
       .then((page) => setFirms(page.content))
       .catch(() => setFirms([]));
   }, [transferModal]);
-
-  // Loaded unconditionally (not just when the request modal opens) so Royalty History
-  // rows can also resolve franchiseeId to a display name.
-  useEffect(() => {
-    if (!salon?.firmId) return;
-    getFirm(salon.firmId)
-      .then((firm) => setCurrentFirmOwners(firm.owners))
-      .catch(() => setCurrentFirmOwners([]));
-  }, [salon?.firmId]);
-
-  useEffect(() => {
-    if (!royaltyModal) return;
-    const primary = currentFirmOwners.find((o) => o.isPrimary) ?? currentFirmOwners[0];
-    setRoyaltyFranchiseeId(primary ? primary.franchiseeId : '');
-  }, [royaltyModal, currentFirmOwners]);
 
   const officialName = (officialId?: string) => {
     if (!officialId) return '—';
@@ -151,19 +138,10 @@ export function SalonDetail() {
     return o ? o.name : `#${officialId}`;
   };
 
-  /** Royalty request response is IDs-only; resolve a login user id to a name via the
-   * already-loaded Officials list (Official.userId links an official to a login user).
-   * Falls back to "User #id" when no match — most likely an Admin, who isn't an Official. */
   const userName = (userId?: string) => {
     if (!userId) return '—';
     const o = officials.find((of) => of.userId === userId);
     return o ? o.name : `User #${userId}`;
-  };
-
-  const franchiseeNameById = (franchiseeId?: string) => {
-    if (!franchiseeId) return '—';
-    const owner = currentFirmOwners.find((o) => o.franchiseeId === franchiseeId);
-    return owner?.franchiseeName ?? `Franchisee #${franchiseeId}`;
   };
 
   const { currentAgreement, historyAgreements } = useMemo(() => {
@@ -172,14 +150,6 @@ export function SalonDetail() {
     return { currentAgreement: active, historyAgreements: rest };
   }, [agreements]);
 
-  /**
-   * SalonResponse (every salon GET/list/create/update endpoint) does not include
-   * currentRoyaltyPercentage — confirmed against backend source. The column exists on
-   * the entity but is only ever written internally when a royalty request resolves;
-   * nothing reads it back out via the Salon API. So this is derived here instead, from
-   * the most recently resolved APPROVED request in this salon's own royalty history —
-   * the salon's percentage only actually changes once both tiers approve.
-   */
   const currentRoyaltyPercentage = useMemo(() => {
     const approved = royaltyHistory.filter((r) => r.overallStatus === 'APPROVED');
     if (approved.length === 0) return null;
@@ -191,7 +161,7 @@ export function SalonDetail() {
     if (!salon || !newFirmId || !transferReason.trim()) return;
     setBusy(true);
     try {
-      await transferSalonFirm(salon.id, newFirmId, transferReason, true);
+      await transferSalon(salon.id, newFirmId, transferReason);
       const targetFirm = firms.find((f) => f.id === newFirmId);
       showToast('success', `Salon transferred to ${targetFirm?.legalName ?? 'new firm'}.`);
       setTransferModal(false);
@@ -206,26 +176,27 @@ export function SalonDetail() {
   };
 
   const handleRequestRoyaltyChange = async () => {
-    if (!salon || !royaltyFranchiseeId || !royaltyForm.newPercentage.trim() || !royaltyForm.reason.trim()) return;
+    if (!salon || !royaltyForm.newPercentage.trim() || !royaltyForm.newRoyaltyType.trim() || !royaltyForm.reason.trim()) return;
     setRoyaltyBusy(true);
     try {
-      await createRoyaltyRequest({
-        salonId: salon.id,
-        franchiseeId: royaltyFranchiseeId,
+      const created = await submitRoyaltyRequest(salon.id, {
         newPercentage: Number(royaltyForm.newPercentage),
+        newRoyaltyType: royaltyForm.newRoyaltyType.trim(),
         reason: royaltyForm.reason,
         instructedBy: royaltyForm.instructedBy.trim() || undefined,
       });
-      showToast('success', 'Royalty change request submitted for approval.');
+      showToast(
+        'success',
+        created.skippedStateHeadStep
+          ? 'Submitted. As the assigned State Head, this skips the recommendation step and goes directly to Admin.'
+          : 'Royalty change request submitted for approval.',
+      );
       setRoyaltyModal(false);
-      setRoyaltyForm({ newPercentage: '', reason: '', instructedBy: '' });
+      setRoyaltyForm({ newPercentage: '', newRoyaltyType: '', reason: '', instructedBy: '' });
       loadRoyaltyHistory();
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        showToast(
-          'error',
-          "You aren't the assigned Relationship/Cluster Manager for this salon, so you can't submit a royalty change request here.",
-        );
+        showToast('error', "You aren't the assigned Regional Manager, Cluster Manager, or State Head for this salon.");
       } else {
         showToast('error', err instanceof ApiError ? err.message : 'Failed to submit royalty change request.');
       }
@@ -234,54 +205,26 @@ export function SalonDetail() {
     }
   };
 
-  const handleCreateAgreement = async () => {
-    if (!salon || !agreementForm.validFrom || !agreementForm.validTill) return;
-    setBusy(true);
-    try {
-      await createAgreement(salon.id, {
-        validFrom: agreementForm.validFrom,
-        validTill: agreementForm.validTill,
-        contractYear: agreementForm.contractYear ? Number(agreementForm.contractYear) : undefined,
-        renewalYear: agreementForm.renewalYear ? Number(agreementForm.renewalYear) : undefined,
-        royaltyTerms: agreementForm.royaltyTerms.trim() || undefined,
-      }, true);
-      showToast('success', 'Agreement created.');
-      setCreateModal(false);
-      setAgreementForm(emptyAgreementForm);
-      loadAgreements();
-    } catch (err) {
-      showToast('error', err instanceof ApiError ? err.message : 'Failed to create agreement.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const openEdit = (a: Agreement) => {
+  const openEditAgreement = (a: Agreement) => {
     setEditModal(a);
-    setAgreementForm({
-      validFrom: a.validFrom,
-      validTill: a.validTill,
-      contractYear: a.contractYear != null ? String(a.contractYear) : '',
-      renewalYear: a.renewalYear != null ? String(a.renewalYear) : '',
-      royaltyTerms: a.royaltyTerms ?? '',
-    });
+    setEditRoyaltyTerms(a.royaltyTerms ?? '');
   };
 
   const handleEditAgreement = async () => {
     if (!editModal) return;
     setBusy(true);
     try {
-      await updateAgreement(editModal.id, {
-        validFrom: agreementForm.validFrom || undefined,
-        contractYear: agreementForm.contractYear ? Number(agreementForm.contractYear) : undefined,
-        renewalYear: agreementForm.renewalYear ? Number(agreementForm.renewalYear) : undefined,
-        royaltyTerms: agreementForm.royaltyTerms.trim() || undefined,
-      }, true);
+      await updateAgreement(editModal.id, editRoyaltyTerms);
       showToast('success', 'Agreement updated.');
       setEditModal(null);
       loadAgreements();
     } catch (err) {
-      showToast('error', err instanceof ApiError ? err.message : 'Failed to update agreement.');
+      if (err instanceof ApiError && err.status === 409) {
+        showToast('error', err.message);
+        setEditModal(null);
+      } else {
+        showToast('error', err instanceof ApiError ? err.message : 'Failed to update agreement.');
+      }
     } finally {
       setBusy(false);
     }
@@ -289,25 +232,24 @@ export function SalonDetail() {
 
   const openRenew = (a: Agreement) => {
     setRenewModal(a);
-    setAgreementForm({ validFrom: '', validTill: '', contractYear: '', renewalYear: '', royaltyTerms: a.royaltyTerms ?? '' });
+    setRenewForm({ validFrom: '', newValidTill: '', royaltyTerms: a.royaltyTerms ?? '' });
   };
 
   const handleRenew = async () => {
-    if (!renewModal || !agreementForm.validFrom || !agreementForm.validTill) return;
+    if (!renewModal || !renewForm.validFrom || !renewForm.newValidTill || !renewForm.royaltyTerms.trim()) return;
     setBusy(true);
     try {
-      await renewAgreement(renewModal.id, {
-        validFrom: agreementForm.validFrom,
-        validTill: agreementForm.validTill,
-        contractYear: agreementForm.contractYear ? Number(agreementForm.contractYear) : undefined,
-        renewalYear: agreementForm.renewalYear ? Number(agreementForm.renewalYear) : undefined,
-        royaltyTerms: agreementForm.royaltyTerms.trim() || undefined,
-      }, true);
-      showToast('success', 'Agreement renewed. The previous agreement is now superseded.');
+      await renewAgreement(renewModal.id, renewForm);
+      showToast('success', 'Agreement renewed — viewing the new agreement.');
       setRenewModal(null);
       loadAgreements();
     } catch (err) {
-      showToast('error', err instanceof ApiError ? err.message : 'Failed to renew agreement.');
+      if (err instanceof ApiError && err.status === 409) {
+        showToast('error', err.message);
+        setRenewModal(null);
+      } else {
+        showToast('error', err instanceof ApiError ? err.message : 'Failed to renew agreement.');
+      }
     } finally {
       setBusy(false);
     }
@@ -317,13 +259,18 @@ export function SalonDetail() {
     if (!terminateModal || !terminateReason.trim()) return;
     setBusy(true);
     try {
-      await terminateAgreement(terminateModal.id, terminateReason, true);
+      await terminateAgreement(terminateModal.id, terminateReason);
       showToast('info', 'Agreement terminated.');
       setTerminateModal(null);
       setTerminateReason('');
       loadAgreements();
     } catch (err) {
-      showToast('error', err instanceof ApiError ? err.message : 'Failed to terminate agreement.');
+      if (err instanceof ApiError && err.status === 409) {
+        showToast('error', err.message);
+        setTerminateModal(null);
+      } else {
+        showToast('error', err instanceof ApiError ? err.message : 'Failed to terminate agreement.');
+      }
     } finally {
       setBusy(false);
     }
@@ -372,7 +319,7 @@ export function SalonDetail() {
               <Scissors className="h-7 w-7" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-ink">{salon.salonName}</h1>
+              <h1 className="text-xl font-bold text-ink">{salon.name}</h1>
               <p className="text-sm text-ink-secondary mt-1">
                 Salon #{salon.id} {salon.operationalStatus && `· ${salon.operationalStatus}`}
               </p>
@@ -413,10 +360,10 @@ export function SalonDetail() {
         <Card className="p-6">
           <h2 className="text-base font-semibold text-ink mb-4">Salon Details</h2>
           <div className="space-y-4">
-            <DetailRow icon={Store} label="Salon Name" value={salon.salonName} />
+            <DetailRow icon={Store} label="Salon Name" value={salon.name} />
             <DetailRow icon={MapPin} label="Address" value={salon.address || '—'} />
             <DetailRow icon={Calendar} label="Launch Date" value={formatDate(salon.launchDate)} />
-            <DetailRow icon={Store} label="Format / Sq.ft" value={`${salon.salonFormat || '—'} / ${salon.squareFootage ?? '—'}`} />
+            <DetailRow icon={Store} label="Format / Sq.ft" value={`${salon.format || '—'} / ${salon.sqFt ?? '—'}`} />
             <DetailRow icon={MapPin} label="Region" value={salon.region || '—'} />
           </div>
         </Card>
@@ -424,10 +371,14 @@ export function SalonDetail() {
         <Card className="p-6">
           <h2 className="text-base font-semibold text-ink mb-4">Officials Assigned</h2>
           <div className="space-y-4">
-            <DetailRow icon={Building2} label="Cluster Head" value={officialName(salon.clusterHeadId)} />
-            <DetailRow icon={Building2} label="Regional Head" value={officialName(salon.regionalHeadId)} />
-            <DetailRow icon={Building2} label="State Head" value={officialName(salon.stateHeadId)} />
+            <DetailRow icon={Building2} label="Cluster Head" value={officialName(salon.clusterHeadOfficialId)} />
+            <DetailRow icon={Building2} label="Regional Head" value={officialName(salon.regionalHeadOfficialId)} />
+            <DetailRow icon={Building2} label="State Head" value={officialName(salon.stateHeadOfficialId)} />
           </div>
+          <p className="text-xs text-ink-secondary mt-4">
+            Reassigning a salon's officials has no defined endpoint in the current backend spec — this is a known
+            open item, not a missing feature in this UI.
+          </p>
         </Card>
       </div>
 
@@ -435,41 +386,36 @@ export function SalonDetail() {
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-semibold text-ink">Agreement</h2>
-          {!currentAgreement && (
-            <Button size="sm" onClick={() => setCreateModal(true)}>
-              <Plus className="h-3.5 w-3.5" />
-              Create Agreement
-            </Button>
-          )}
         </div>
 
         {agreementsLoading ? (
           <Skeleton className="h-24 w-full" />
         ) : !currentAgreement ? (
-          <EmptyState title="No agreement on file" message="Create an agreement to establish contract terms for this salon." icon={<FileText className="h-8 w-8" />} />
+          <EmptyState title="No agreement on file" message="Agreements are created via the Franchise Creation wizard." icon={<FileText className="h-8 w-8" />} />
         ) : (
           <div className="space-y-4">
             <div className="rounded-xl border border-brand-100 bg-brand-50/40 px-5 py-4">
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-ink">Current Agreement</span>
-                  <Badge kind="VERIFIED" label={currentAgreement.status ?? 'ACTIVE'} />
+                  <StatusBadge bucket={agreementStatusBucket[currentAgreement.status]} label={currentAgreement.status} />
+                  {currentAgreement.isExpired && <StatusBadge bucket="computed" label="Expired" />}
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => openEdit(currentAgreement)}>
+                  <Button size="sm" variant="secondary" disabled={currentAgreement.status !== 'ACTIVE'} onClick={() => openEditAgreement(currentAgreement)}>
                     Edit
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={() => openRenew(currentAgreement)}>
+                  <Button size="sm" variant="secondary" disabled={currentAgreement.status !== 'ACTIVE'} onClick={() => openRenew(currentAgreement)}>
                     <RefreshCw className="h-3.5 w-3.5" />
                     Renew
                   </Button>
-                  <Button size="sm" variant="danger" onClick={() => setTerminateModal(currentAgreement)}>
+                  <Button size="sm" variant="danger" disabled={currentAgreement.status !== 'ACTIVE'} onClick={() => setTerminateModal(currentAgreement)}>
                     <Ban className="h-3.5 w-3.5" />
                     Terminate
                   </Button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
                 <div>
                   <p className="text-xs text-ink-secondary">Valid From</p>
                   <p className="text-ink font-medium">{formatDate(currentAgreement.validFrom)}</p>
@@ -478,16 +424,14 @@ export function SalonDetail() {
                   <p className="text-xs text-ink-secondary">Valid Till</p>
                   <p className="text-ink font-medium">{formatDate(currentAgreement.validTill)}</p>
                 </div>
-                <div>
-                  <p className="text-xs text-ink-secondary">Contract Year</p>
-                  <p className="text-ink font-medium">{currentAgreement.contractYear ?? '—'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-ink-secondary">Renewal Year</p>
-                  <p className="text-ink font-medium">{currentAgreement.renewalYear ?? '—'}</p>
-                </div>
+                {currentAgreement.statusReason && (
+                  <div>
+                    <p className="text-xs text-ink-secondary">Status Reason</p>
+                    <p className="text-ink font-medium">{currentAgreement.statusReason}</p>
+                  </div>
+                )}
                 {currentAgreement.royaltyTerms && (
-                  <div className="col-span-2 sm:col-span-4">
+                  <div className="col-span-2 sm:col-span-3">
                     <p className="text-xs text-ink-secondary">Royalty Terms</p>
                     <p className="text-ink">{currentAgreement.royaltyTerms}</p>
                   </div>
@@ -513,7 +457,7 @@ export function SalonDetail() {
                           <span className="text-ink">{formatDate(a.validFrom)} – {formatDate(a.validTill)}</span>
                           {a.royaltyTerms && <span className="text-ink-secondary ml-2">· {a.royaltyTerms}</span>}
                         </div>
-                        <Badge kind="DRAFT" label={a.status ?? 'SUPERSEDED'} />
+                        <StatusBadge bucket={agreementStatusBucket[a.status]} label={a.status} />
                       </div>
                     ))}
                   </div>
@@ -544,35 +488,42 @@ export function SalonDetail() {
                     <span className="text-ink font-medium">
                       {r.currentPercentage != null ? `${r.currentPercentage}%` : 'Not set'} → {r.newPercentage}%
                     </span>
-                    <Badge kind={royaltyStatusBadgeKind(r.overallStatus)} label={r.overallStatus} />
+                    <StatusBadge bucket={royaltyStatusBucket(r.overallStatus)} label={royaltyStatusLabel(r.overallStatus)} />
                   </div>
                   <span className="text-xs text-ink-secondary">{formatDate(r.createdAt)}</span>
                 </div>
-                <div className="text-xs text-ink-secondary flex flex-wrap gap-x-2">
-                  <span>State Head: <Badge kind={royaltyStatusBadgeKind(r.stateHeadDecision)} label={r.stateHeadDecision} size="sm" /></span>
-                  <span>Admin: <Badge kind={royaltyStatusBadgeKind(r.adminDecision)} label={r.adminDecision} size="sm" /></span>
-                </div>
                 <p className="text-sm text-ink">
-                  <span className="text-ink-secondary">Franchisee:</span> {franchiseeNameById(r.franchiseeId)}
-                  <span className="text-ink-secondary"> · Reason:</span> {r.reason || '—'}
+                  <span className="text-ink-secondary">Reason:</span> {r.reason || '—'}
                   {r.instructedBy && <span className="text-ink-secondary"> · Instructed by: {r.instructedBy}</span>}
                 </p>
-                <p className="text-xs text-ink-secondary">Requested by {userName(r.requestedBy)}</p>
-                {r.stateHeadReason && (
-                  <p className="text-xs text-ink-secondary">
-                    State Head decision by {userName(r.stateHeadDecidedBy)}: {r.stateHeadReason}
-                  </p>
-                )}
-                {r.adminReason && (
-                  <p className="text-xs text-ink-secondary">
-                    Admin decision by {userName(r.adminDecidedBy)}: {r.adminReason}
-                  </p>
-                )}
+                <div className="text-xs text-ink-secondary space-y-1">
+                  <p>Submitted by {userName(r.requestedBy)}</p>
+                  {r.skippedStateHeadStep && <p>Skipped the State Head recommendation step (submitter was the assigned State Head).</p>}
+                  {r.stateHeadDecidedAt && (
+                    <p>
+                      State Head {r.stateHeadDecision === 'APPROVED' ? 'approved' : 'rejected'} on{' '}
+                      {formatDate(r.stateHeadDecidedAt)} by {userName(r.stateHeadDecidedBy)}
+                      {r.stateHeadReason && ` — ${r.stateHeadReason}`}
+                    </p>
+                  )}
+                  {r.stateHeadDecision === 'APPROVED' && r.adminDecidedAt && (
+                    <p>
+                      Admin {r.adminDecision === 'APPROVED' ? 'approved' : 'rejected'} on{' '}
+                      {formatDate(r.adminDecidedAt)} by {userName(r.adminDecidedBy)}
+                      {r.adminReason && ` — ${r.adminReason}`}
+                    </p>
+                  )}
+                  {r.overallStatus === 'PENDING_ADMIN' && <p>Awaiting Admin decision.</p>}
+                </div>
               </div>
             ))}
           </div>
         )}
       </Card>
+
+      <SalonAuditsSection salonId={salon.id} />
+
+      <DocumentsPanel entityType="SALON" entityId={salon.id} />
 
       {/* Transfer modal */}
       <Modal
@@ -583,7 +534,7 @@ export function SalonDetail() {
           setTransferReason('');
         }}
         title="Transfer Salon to Different Firm"
-        description={`Reassign ${salon.salonName} to a new firm.`}
+        description={`Reassign ${salon.name} to a new firm.`}
         primaryLabel="Confirm Transfer"
         primaryDisabled={!newFirmId || !transferReason.trim() || busy}
         onPrimary={handleTransfer}
@@ -592,7 +543,7 @@ export function SalonDetail() {
           <Select label="New Firm" value={newFirmId} onChange={(e) => setNewFirmId(e.target.value)}>
             <option value="">Select a firm...</option>
             {firms
-              .filter((f) => f.id !== salon.firmId)
+              .filter((f) => f.id !== salon.currentFirmId)
               .map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.legalName} ({f.gstNumber || 'no GST'})
@@ -615,32 +566,15 @@ export function SalonDetail() {
         open={royaltyModal}
         onClose={() => {
           setRoyaltyModal(false);
-          setRoyaltyForm({ newPercentage: '', reason: '', instructedBy: '' });
+          setRoyaltyForm({ newPercentage: '', newRoyaltyType: '', reason: '', instructedBy: '' });
         }}
         title="Request Royalty Change"
-        description={`Submit a royalty change request for ${salon.salonName}. This goes to the State Head and Admin for approval.`}
+        description={`Submit a royalty change request for ${salon.name}. This goes to the State Head first, then Admin, for approval.`}
         primaryLabel={royaltyBusy ? 'Submitting...' : 'Submit Request'}
-        primaryDisabled={!royaltyFranchiseeId || !royaltyForm.newPercentage.trim() || !royaltyForm.reason.trim() || royaltyBusy}
+        primaryDisabled={!royaltyForm.newPercentage.trim() || !royaltyForm.newRoyaltyType.trim() || !royaltyForm.reason.trim() || royaltyBusy}
         onPrimary={handleRequestRoyaltyChange}
       >
         <div className="space-y-4">
-          {currentFirmOwners.length > 1 ? (
-            <Select label="Franchisee" value={royaltyFranchiseeId} onChange={(e) => setRoyaltyFranchiseeId(e.target.value)}>
-              {currentFirmOwners.map((o) => (
-                <option key={o.franchiseeId} value={o.franchiseeId}>
-                  {o.franchiseeName ?? `Franchisee #${o.franchiseeId}`} {o.isPrimary ? '(Primary)' : ''}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <Input
-              label="Franchisee"
-              value={currentFirmOwners[0]?.franchiseeName ?? (royaltyFranchiseeId ? `Franchisee #${royaltyFranchiseeId}` : '—')}
-              disabled
-              className="opacity-60"
-            />
-          )}
-          <Input label="Salon" value={salon.salonName} disabled className="opacity-60" />
           <Input
             label="Current %"
             value={currentRoyaltyPercentage != null ? `${currentRoyaltyPercentage}%` : 'Not set'}
@@ -656,6 +590,12 @@ export function SalonDetail() {
             placeholder="E.g. 8.5"
             value={royaltyForm.newPercentage}
             onChange={(e) => setRoyaltyForm({ ...royaltyForm, newPercentage: e.target.value })}
+          />
+          <Input
+            label="New Royalty Type"
+            placeholder="E.g. PERCENTAGE_OF_REVENUE"
+            value={royaltyForm.newRoyaltyType}
+            onChange={(e) => setRoyaltyForm({ ...royaltyForm, newRoyaltyType: e.target.value })}
           />
           <Textarea
             label="Why"
@@ -674,60 +614,17 @@ export function SalonDetail() {
         </div>
       </Modal>
 
-      {/* Create agreement modal */}
-      <Modal
-        open={createModal}
-        onClose={() => {
-          setCreateModal(false);
-          setAgreementForm(emptyAgreementForm);
-        }}
-        title="Create Agreement"
-        description={`Establish contract terms for ${salon.salonName}.`}
-        primaryLabel={busy ? 'Saving...' : 'Create Agreement'}
-        primaryDisabled={!agreementForm.validFrom || !agreementForm.validTill || busy}
-        onPrimary={handleCreateAgreement}
-      >
-        <AgreementFormFields form={agreementForm} setForm={setAgreementForm} />
-      </Modal>
-
-      {/* Edit agreement modal — validTill intentionally omitted, use Renew instead */}
+      {/* Edit agreement modal — royaltyTerms is the ONLY editable field */}
       <Modal
         open={!!editModal}
         onClose={() => setEditModal(null)}
         title="Edit Agreement"
-        description="Valid Till cannot be changed here — use Renew to extend the contract term."
+        description="Only royalty terms can be edited here — dates require Renew."
         primaryLabel={busy ? 'Saving...' : 'Save Changes'}
         primaryDisabled={busy}
         onPrimary={handleEditAgreement}
       >
-        <div className="space-y-4">
-          <Input
-            label="Valid From"
-            type="date"
-            value={agreementForm.validFrom}
-            onChange={(e) => setAgreementForm({ ...agreementForm, validFrom: e.target.value })}
-          />
-          <Input label="Valid Till" type="date" value={agreementForm.validTill} disabled className="opacity-60" />
-          <p className="text-xs text-ink-secondary -mt-2">Read-only here — use Renew to change the end date.</p>
-          <Input
-            label="Contract Year"
-            type="number"
-            value={agreementForm.contractYear}
-            onChange={(e) => setAgreementForm({ ...agreementForm, contractYear: e.target.value })}
-          />
-          <Input
-            label="Renewal Year"
-            type="number"
-            value={agreementForm.renewalYear}
-            onChange={(e) => setAgreementForm({ ...agreementForm, renewalYear: e.target.value })}
-          />
-          <Textarea
-            label="Royalty Terms"
-            rows={2}
-            value={agreementForm.royaltyTerms}
-            onChange={(e) => setAgreementForm({ ...agreementForm, royaltyTerms: e.target.value })}
-          />
-        </div>
+        <Textarea label="Royalty Terms" rows={3} value={editRoyaltyTerms} onChange={(e) => setEditRoyaltyTerms(e.target.value)} />
       </Modal>
 
       {/* Renew modal */}
@@ -737,10 +634,16 @@ export function SalonDetail() {
         title="Renew Agreement"
         description="Creates a new agreement record and supersedes the current one."
         primaryLabel={busy ? 'Renewing...' : 'Renew Agreement'}
-        primaryDisabled={!agreementForm.validFrom || !agreementForm.validTill || busy}
+        primaryDisabled={!renewForm.validFrom || !renewForm.newValidTill || !renewForm.royaltyTerms.trim() || busy}
         onPrimary={handleRenew}
       >
-        <AgreementFormFields form={agreementForm} setForm={setAgreementForm} />
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Valid From" type="date" value={renewForm.validFrom} onChange={(e) => setRenewForm({ ...renewForm, validFrom: e.target.value })} />
+            <Input label="New Valid Till" type="date" value={renewForm.newValidTill} onChange={(e) => setRenewForm({ ...renewForm, newValidTill: e.target.value })} />
+          </div>
+          <Textarea label="Royalty Terms" rows={3} value={renewForm.royaltyTerms} onChange={(e) => setRenewForm({ ...renewForm, royaltyTerms: e.target.value })} />
+        </div>
       </Modal>
 
       {/* Terminate modal */}
@@ -770,35 +673,7 @@ export function SalonDetail() {
   );
 }
 
-function AgreementFormFields({
-  form,
-  setForm,
-}: {
-  form: typeof emptyAgreementForm;
-  setForm: (f: typeof emptyAgreementForm) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <Input label="Valid From" type="date" value={form.validFrom} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} />
-        <Input label="Valid Till" type="date" value={form.validTill} onChange={(e) => setForm({ ...form, validTill: e.target.value })} />
-        <Input label="Contract Year" type="number" value={form.contractYear} onChange={(e) => setForm({ ...form, contractYear: e.target.value })} />
-        <Input label="Renewal Year" type="number" value={form.renewalYear} onChange={(e) => setForm({ ...form, renewalYear: e.target.value })} />
-      </div>
-      <Textarea label="Royalty Terms" rows={2} value={form.royaltyTerms} onChange={(e) => setForm({ ...form, royaltyTerms: e.target.value })} />
-    </div>
-  );
-}
-
-function DetailRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Store;
-  label: string;
-  value: string;
-}) {
+function DetailRow({ icon: Icon, label, value }: { icon: typeof Store; label: string; value: string }) {
   return (
     <div className="flex items-start gap-3">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600 shrink-0">
