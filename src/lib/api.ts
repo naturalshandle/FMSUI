@@ -299,6 +299,11 @@ interface RawUserResponse {
   id: number;
   email: string;
   roleName: string;
+  status: AdminUser['status'];
+}
+
+function adaptAdminUser(u: RawUserResponse): AdminUser {
+  return { id: String(u.id), email: u.email, roleName: u.roleName, status: u.status };
 }
 
 /** POST /api/v1/admin/users — body is just {email, roleName} per spec §2. */
@@ -307,5 +312,12 @@ export async function createAdminUser(input: { email: string; roleName: string }
     method: 'POST',
     body: { email: input.email, roleName: input.roleName },
   });
-  return { id: String(data.id), email: data.email, roleName: data.roleName };
+  return adaptAdminUser(data);
+}
+
+/** GET /api/v1/admin/users — admin only. roleName is comma-joined if a user holds
+ * multiple roles. */
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  const data = await request<RawUserResponse[]>('/admin/users');
+  return data.map(adaptAdminUser);
 }

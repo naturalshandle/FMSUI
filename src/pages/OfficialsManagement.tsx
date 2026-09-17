@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldCheck, Plus, Search, Link2, Pencil, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select } from '@/components/ui/Input';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { Pagination } from '@/components/ui/Pagination';
 import { SkeletonTable } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
+import { UserStatusBadge } from '@/components/domain/UserStatusBadge';
 import { usePagedList } from '@/lib/pagination';
 import {
   listOfficials,
@@ -18,10 +20,10 @@ import {
   deleteOfficial,
   OfficialInUseError,
 } from '@/lib/officialsApi';
-import { ApiError } from '@/lib/api';
+import { listAdminUsers, ApiError } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { isAdmin } from '@/lib/roles';
-import type { Official } from '@/types';
+import type { AdminUser, Official } from '@/types';
 
 const officialTypeLabels: Record<string, string> = {
   CLUSTER_MANAGER: 'Cluster Manager',
@@ -65,10 +67,47 @@ export function OfficialsManagement() {
   const [editForm, setEditForm] = useState(emptyForm);
 
   const [linkModal, setLinkModal] = useState<Official | null>(null);
-  const [linkUserId, setLinkUserId] = useState('');
+  const [linkUserId, setLinkUserId] = useState<string | null>(null);
+  const [linkableUsers, setLinkableUsers] = useState<AdminUser[]>([]);
+  const [linkUsersLoading, setLinkUsersLoading] = useState(false);
+  const [linkUsersError, setLinkUsersError] = useState<string | null>(null);
 
   const [deleteModal, setDeleteModal] = useState<Official | null>(null);
   const [deleteBlockedCount, setDeleteBlockedCount] = useState<number | null>(null);
+
+  // Reuses the same GET /api/v1/admin/users the Admin Users page lists from —
+  // no second endpoint. Filtered to users holding the role matching this
+  // Official's type, since the backend rejects any other role at link time.
+  useEffect(() => {
+    if (!linkModal) return;
+    let cancelled = false;
+    setLinkUsersLoading(true);
+    setLinkUsersError(null);
+    listAdminUsers()
+      .then((users) => {
+        if (!cancelled) setLinkableUsers(users);
+      })
+      .catch((err) => {
+        if (!cancelled) setLinkUsersError(err instanceof ApiError ? err.message : 'Failed to load users.');
+      })
+      .finally(() => {
+        if (!cancelled) setLinkUsersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [linkModal]);
+
+  const linkableUserOptions = linkModal
+    ? linkableUsers
+        .filter((u) =>
+          u.roleName
+            .split(',')
+            .map((r) => r.trim())
+            .includes(linkModal.officialType),
+        )
+        .map((u) => ({ value: u.id, label: u.email }))
+    : [];
 
   const filtered = officials.filter((o) => {
     if (!search.trim()) return true;
@@ -156,7 +195,7 @@ export function OfficialsManagement() {
       await linkUserToOfficial(linkModal.id, Number(linkUserId));
       showToast('success', `Login linked to ${linkModal.name}.`);
       setLinkModal(null);
-      setLinkUserId('');
+      setLinkUserId(null);
       reload();
     } catch (err) {
       showToast('error', err instanceof ApiError ? err.message : 'Failed to link user.');
@@ -275,7 +314,10 @@ export function OfficialsManagement() {
                     <td className="px-3 py-4 text-sm text-ink-secondary">{o.contact}</td>
                     <td className="px-3 py-4">
                       {o.userId ? (
-                        <span className="text-xs text-status-verified font-medium">Linked (User #{o.userId})</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-status-verified font-medium">Linked (User #{o.userId})</span>
+                          <UserStatusBadge status={o.status} />
+                        </div>
                       ) : (
                         <span className="text-xs text-ink-secondary">Not linked</span>
                       )}
@@ -390,21 +432,44 @@ export function OfficialsManagement() {
         open={!!linkModal}
         onClose={() => {
           setLinkModal(null);
-          setLinkUserId('');
+          setLinkUserId(null);
         }}
         title="Link User"
-        description={linkModal ? `Attach a login to ${linkModal.name}.` : ''}
+        description={
+          linkModal
+            ? `Attach a login to ${linkModal.name}. Only users with the ${officialTypeLabels[linkModal.officialType] ?? linkModal.officialType} role are shown.`
+            : ''
+        }
         primaryLabel={saving ? 'Linking...' : 'Link User'}
         primaryDisabled={!linkUserId || saving}
         onPrimary={handleLink}
       >
-        <Input
-          label="User ID"
-          type="number"
-          placeholder="e.g. 5"
-          value={linkUserId}
-          onChange={(e) => setLinkUserId(e.target.value)}
-        />
+        {linkUsersLoading ? (
+          <p className="text-sm text-ink-secondary">Loading users...</p>
+        ) : linkUsersError ? (
+          <p className="text-sm text-status-rejected">{linkUsersError}</p>
+        ) : linkableUserOptions.length === 0 ? (
+          <p className="text-sm text-ink-secondary">
+            No users hold the {linkModal ? (officialTypeLabels[linkModal.officialType] ?? linkModal.officialType) : ''}{' '}
+            role yet. Create one from Admin Users first.
+          </p>
+        ) : (
+          <>
+            <SearchableSelect
+              label="User"
+              placeholder="Select by email..."
+              options={linkableUserOptions}
+              value={linkUserId}
+              onChange={setLinkUserId}
+              emptyMessage="No users match your search."
+            />
+            {/* The admin-users list has no field indicating which Official (if any)
+                a user is already linked to, and Officials are paginated server-side,
+                so "already linked to a different Official" can't be reliably
+                cross-referenced client-side without a dedicated backend field.
+                Not filtered here — flagged instead of guessed. */}
+          </>
+        )}
       </Modal>
 
       {/* Delete modal (admin only) */}

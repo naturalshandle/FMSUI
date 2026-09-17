@@ -67,6 +67,10 @@ export interface Salon {
   updatedAt?: string;
 }
 
+/** Backend UserStatus enum. LOCKED/DISABLED exist on the enum but aren't reachable
+ * from the officials/admin-users flows today — treat as unstyled fallbacks, not bugs. */
+export type UserAccountStatus = 'PENDING_ACTIVATION' | 'ACTIVE' | 'LOCKED' | 'DISABLED';
+
 /** Admin - Officials. Backend enum values for officialType are unconfirmed beyond the CLUSTER_MANAGER example in the Postman collection. */
 export type OfficialType = 'CLUSTER_MANAGER' | 'REGIONAL_MANAGER' | 'STATE_HEAD' | string;
 
@@ -78,6 +82,8 @@ export interface Official {
   email?: string;
   region?: string;
   userId?: string | null;
+  /** Linked user's activation status — null/undefined when no user is linked. */
+  status?: UserAccountStatus | null;
 }
 
 export type AgreementStatus = 'ACTIVE' | 'SUPERSEDED' | 'TERMINATED';
@@ -125,11 +131,12 @@ export interface DashboardData {
   franchiseCreationDraftsInProgress: number;
 }
 
-/** POST /api/v1/admin/users response — spec §2. */
+/** POST /api/v1/admin/users and GET /api/v1/admin/users response — spec §2. */
 export interface AdminUser {
   id: string;
   email: string;
   roleName: string;
+  status: UserAccountStatus;
 }
 
 export interface CurrentUser {

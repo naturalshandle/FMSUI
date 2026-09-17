@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { UploadCloud, FileText, X, Loader2 } from 'lucide-react';
 
 interface FileUploadProps {
@@ -18,6 +18,10 @@ interface FileUploadProps {
 export function FileUpload({ label, optional, accept, onFileSelected, uploading, error }: FileUploadProps) {
   const [fileName, setFileName] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Was previously derived from `label` text, which collides across rows sharing a
+  // label (e.g. Owner 1 vs Owner 2's "PAN Proof") — duplicate DOM ids, unreliable
+  // label-click/for-id behavior. useId() is unique per rendered instance instead.
+  const inputId = useId();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
@@ -37,7 +41,7 @@ export function FileUpload({ label, optional, accept, onFileSelected, uploading,
         {label}
         {optional && <span className="ml-1.5 text-xs font-normal text-ink-secondary">(optional)</span>}
       </label>
-      <input ref={inputRef} type="file" accept={accept} onChange={handleChange} className="hidden" id={`file-${label}`} />
+      <input ref={inputRef} type="file" accept={accept} onChange={handleChange} className="hidden" id={inputId} />
       {fileName ? (
         <div className="flex items-center gap-3 rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-2.5">
           <FileText className="h-4 w-4 text-brand-600 shrink-0" />
@@ -57,7 +61,7 @@ export function FileUpload({ label, optional, accept, onFileSelected, uploading,
         </div>
       ) : (
         <label
-          htmlFor={`file-${label}`}
+          htmlFor={inputId}
           className="flex items-center gap-3 rounded-xl border border-dashed border-brand-200 bg-brand-50/30 px-4 py-2.5 text-sm text-ink-secondary cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition-all"
         >
           <UploadCloud className="h-4 w-4 shrink-0" />

@@ -21,3 +21,12 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.test
+.env.*.local
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/playwright/.auth/
+/blob-report/

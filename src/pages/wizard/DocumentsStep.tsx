@@ -12,14 +12,23 @@ interface Props {
   onReview: (updated: FranchiseCreationDraft) => void;
 }
 
-/** Client-side courtesy allow-list only — the backend performs no content-type or
- * size validation on this endpoint (a known, accepted gap, not fixed by this UI). */
+/** Client-side courtesy allow-list only — the backend performs no content-type
+ * validation on this endpoint (a known, accepted gap, not fixed by this UI). Size
+ * IS enforced server-side by DocumentStorageService, so MAX_BYTES here mirrors that
+ * limit as a UX courtesy — the backend response is still the source of truth. */
 const ACCEPT = '.pdf,.jpg,.jpeg,.png';
 const MAX_BYTES = 10 * 1024 * 1024;
+const FILE_SIZE_ERROR_MESSAGE = 'File exceeds the maximum allowed size of 10MB. Please choose a smaller file.';
+
+/** Shared client-side size check, reused across all document upload rows. */
+function validateFileSize(file: File): string | null {
+  return file.size > MAX_BYTES ? FILE_SIZE_ERROR_MESSAGE : null;
+}
 
 export function DocumentsStep({ draft, onSaved, onReview }: Props) {
   const { showToast } = useToast();
   const [uploading, setUploading] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   // franchiseeOwners is null (not []) until the franchisees step has been saved.
   const owners = draft.franchiseeOwners ?? [];
 
@@ -27,19 +36,29 @@ export function DocumentsStep({ draft, onSaved, onReview }: Props) {
     draft.documentsData?.find((d) => d.documentType === documentType && d.ownerIndex === ownerIndex)?.fileName;
 
   const handleUpload = async (documentType: WizardDocumentType, file: File | null, ownerIndex?: number) => {
-    if (!file) return;
-    if (file.size > MAX_BYTES) {
-      showToast('error', 'File is larger than 10MB — this is a UX courtesy limit, please choose a smaller file.');
+    const slotKey = `${documentType}:${ownerIndex ?? ''}`;
+    if (!file) {
+      setErrors((prev) => ({ ...prev, [slotKey]: undefined }));
       return;
     }
-    const slotKey = `${documentType}:${ownerIndex ?? ''}`;
+
+    const sizeError = validateFileSize(file);
+    if (sizeError) {
+      setErrors((prev) => ({ ...prev, [slotKey]: sizeError }));
+      return;
+    }
+
+    setErrors((prev) => ({ ...prev, [slotKey]: undefined }));
     setUploading(slotKey);
     try {
       const updated = await uploadStepDocument(draft.id, documentType, file, ownerIndex);
       showToast('success', 'Document uploaded.');
       onSaved(updated, false);
     } catch (err) {
-      showToast('error', err instanceof ApiError ? err.message : 'Failed to upload document.');
+      const isServerSideSizeError = err instanceof ApiError && err.status === 400 && /exceeds the maximum allowed size/i.test(err.message);
+      const message = isServerSideSizeError ? FILE_SIZE_ERROR_MESSAGE : err instanceof ApiError ? err.message : 'Failed to upload document.';
+      setErrors((prev) => ({ ...prev, [slotKey]: message }));
+      showToast('error', message);
     } finally {
       setUploading(null);
     }
@@ -58,6 +77,7 @@ export function DocumentsStep({ draft, onSaved, onReview }: Props) {
           label={existingFileName('GST_CERTIFICATE') ? `Replace file (current: ${existingFileName('GST_CERTIFICATE')})` : 'GST Certificate'}
           accept={ACCEPT}
           uploading={uploading === 'GST_CERTIFICATE:'}
+          error={errors['GST_CERTIFICATE:']}
           onFileSelected={(file) => handleUpload('GST_CERTIFICATE', file)}
         />
       </div>
@@ -76,6 +96,7 @@ export function DocumentsStep({ draft, onSaved, onReview }: Props) {
             optional={i !== 0}
             accept={ACCEPT}
             uploading={uploading === `PAN_PROOF:${i}`}
+            error={errors[`PAN_PROOF:${i}`]}
             onFileSelected={(file) => handleUpload('PAN_PROOF', file, i)}
           />
           <FileUpload
@@ -85,6 +106,7 @@ export function DocumentsStep({ draft, onSaved, onReview }: Props) {
             optional={i !== 0}
             accept={ACCEPT}
             uploading={uploading === `AADHAAR_PROOF:${i}`}
+            error={errors[`AADHAAR_PROOF:${i}`]}
             onFileSelected={(file) => handleUpload('AADHAAR_PROOF', file, i)}
           />
         </div>

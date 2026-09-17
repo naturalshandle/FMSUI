@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { UserPlus, Shield } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { SkeletonTable } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
+import { UserStatusBadge } from '@/components/domain/UserStatusBadge';
+import * as api from '@/lib/api';
+import { ApiError } from '@/lib/api';
+import type { AdminUser } from '@/types';
 import { roleLabels, STAFF_ROLES } from '@/lib/roles';
 
 const roleBadgeColors: Record<string, string> = {
@@ -19,12 +23,30 @@ const roleBadgeColors: Record<string, string> = {
 };
 
 export function AdminUserManagement() {
-  const { adminUsers, createAdminUser } = useApp();
   const { showToast } = useToast();
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [createModal, setCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ email: '', role: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setAdminUsers(await api.listAdminUsers());
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Failed to load users.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -39,13 +61,14 @@ export function AdminUserManagement() {
     if (!validate()) return;
     setCreating(true);
     try {
-      await createAdminUser({ email: form.email.trim(), roleName: form.role });
+      await api.createAdminUser({ email: form.email.trim(), roleName: form.role });
       showToast('success', `User created. An activation email has been sent to ${form.email.trim()}.`);
       setCreateModal(false);
       setForm({ email: '', role: '' });
       setErrors({});
+      loadUsers();
     } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Failed to create user.');
+      showToast('error', err instanceof ApiError ? err.message : 'Failed to create user.');
     } finally {
       setCreating(false);
     }
@@ -64,18 +87,15 @@ export function AdminUserManagement() {
         </Button>
       </div>
 
-      {adminUsers.length > 0 && (
-        <div className="rounded-xl border border-brand-100 bg-brand-50/50 px-4 py-3 text-sm text-ink-secondary">
-          There is no endpoint to list existing users — this table only shows users created from this screen during
-          the current session, and resets on reload.
-        </div>
-      )}
-
       <Card className="overflow-hidden">
-        {adminUsers.length === 0 ? (
+        {loading ? (
+          <SkeletonTable rows={6} />
+        ) : loadError ? (
+          <EmptyState title="Couldn't load users" message={loadError} icon={<Shield className="h-8 w-8" />} />
+        ) : adminUsers.length === 0 ? (
           <EmptyState
-            title="No users created this session"
-            message="Users you create here will appear in this list until you reload the page."
+            title="No admin users yet"
+            message="Users you create here will appear in this list."
             icon={<Shield className="h-8 w-8" />}
           />
         ) : (
@@ -103,12 +123,15 @@ export function AdminUserManagement() {
                         </div>
                       </td>
                       <td className="px-3 py-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-white ${roleBadgeColors[user.roleName] ?? 'bg-slate-500'}`}
-                        >
-                          <Shield className="h-3 w-3" />
-                          {roleLabels[user.roleName] ?? user.roleName}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-white ${roleBadgeColors[user.roleName] ?? 'bg-slate-500'}`}
+                          >
+                            <Shield className="h-3 w-3" />
+                            {roleLabels[user.roleName] ?? user.roleName}
+                          </span>
+                          <UserStatusBadge status={user.status} />
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -124,12 +147,15 @@ export function AdminUserManagement() {
                     <Avatar initials={getInitials(user.email)} size="sm" />
                     <p className="text-sm font-medium text-ink truncate">{user.email}</p>
                   </div>
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-white ${roleBadgeColors[user.roleName] ?? 'bg-slate-500'}`}
-                  >
-                    <Shield className="h-3 w-3" />
-                    {roleLabels[user.roleName] ?? user.roleName}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-white ${roleBadgeColors[user.roleName] ?? 'bg-slate-500'}`}
+                    >
+                      <Shield className="h-3 w-3" />
+                      {roleLabels[user.roleName] ?? user.roleName}
+                    </span>
+                    <UserStatusBadge status={user.status} />
+                  </div>
                 </div>
               ))}
             </div>

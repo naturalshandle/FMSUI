@@ -1,5 +1,5 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useState } from 'react';
-import type { AdminUser, CurrentUser } from '@/types';
+import type { CurrentUser } from '@/types';
 import * as api from '@/lib/api';
 import { decodeJwt } from '@/lib/jwt';
 
@@ -38,10 +38,6 @@ interface AppState {
    * (a newly-entered code) to actually complete login. Does not clear pendingMfa. */
   enableMfaSetup: (code: string) => Promise<string>;
   verifyMfaLogin: (code: string) => Promise<void>;
-
-  // Admin users (session-scoped — backend has no list endpoint per spec §2)
-  adminUsers: AdminUser[];
-  createAdminUser: (user: { email: string; roleName: string }) => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -74,8 +70,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [pendingMfa, setPendingMfa] = useState<PendingMfa | null>(null);
-
-  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
 
   const applySession = useCallback(() => {
     const restored = userFromStoredToken();
@@ -173,14 +167,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [pendingMfa, applySession],
   );
 
-  const createAdminUser = useCallback(
-    async (user: { email: string; roleName: string }) => {
-      const created = await api.createAdminUser(user);
-      setAdminUsers((prev) => [...prev, created]);
-    },
-    [],
-  );
-
   return (
     <AppContext.Provider
       value={{
@@ -199,8 +185,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fetchMfaSetupInfo,
         enableMfaSetup,
         verifyMfaLogin,
-        adminUsers,
-        createAdminUser,
       }}
     >
       {children}

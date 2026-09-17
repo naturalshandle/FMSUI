@@ -1,6 +1,6 @@
 import { request, ApiError } from '@/lib/api';
 import type { Page } from '@/lib/pagination';
-import type { Official } from '@/types';
+import type { Official, UserAccountStatus } from '@/types';
 
 interface RawOfficial {
   id: number;
@@ -10,6 +10,7 @@ interface RawOfficial {
   email?: string;
   region?: string;
   userId?: number | null;
+  status?: UserAccountStatus | null;
 }
 
 function adaptOfficial(o: RawOfficial): Official {
@@ -21,6 +22,7 @@ function adaptOfficial(o: RawOfficial): Official {
     email: o.email,
     region: o.region,
     userId: o.userId != null ? String(o.userId) : null,
+    status: o.status ?? null,
   };
 }
 

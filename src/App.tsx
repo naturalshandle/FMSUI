@@ -55,7 +55,11 @@ function AppRoutes() {
       <Route path="/login" element={<RedirectIfAuthed><LoginScreen /></RedirectIfAuthed>} />
       <Route path="/forgot-password" element={<RedirectIfAuthed><ForgotPasswordScreen /></RedirectIfAuthed>} />
       <Route path="/reset-password" element={<RedirectIfAuthed><ResetPasswordScreen /></RedirectIfAuthed>} />
-      <Route path="/activate" element={<RedirectIfAuthed><ActivateAccountScreen /></RedirectIfAuthed>} />
+      {/* Deliberately NOT wrapped in RedirectIfAuthed: the activation token, not the
+          current session, is the source of authority here. A leftover session in
+          this browser (e.g. the admin who created the account, or a shared machine)
+          must not bounce the visitor to the dashboard before they can activate. */}
+      <Route path="/activate" element={<ActivateAccountScreen />} />
       <Route path="/mfa/verify" element={<MfaVerifyScreen />} />
       <Route path="/mfa/setup" element={<MfaSetupScreen />} />
       <Route path="/" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><HomeDashboard /></RequireRole></RequireAuth>} />
