@@ -1,55 +1,45 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Percent, Check, X } from 'lucide-react';
+import { Percent, Check, X, AlertTriangle } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
-import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Textarea } from '@/components/ui/Input';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
+import { RoyaltyRequestItem } from '@/components/domain/RoyaltyRequestItem';
 import { useApp } from '@/context/AppContext';
+import { useMyOfficial, isSalonStateHead } from '@/hooks/useMyOfficial';
 import { isAdmin } from '@/lib/roles';
 import { ApiError } from '@/lib/api';
 import { getSalon } from '@/lib/salonsApi';
 import { listOfficials } from '@/lib/officialsApi';
 import {
+  ROYALTY_APPROVED_MESSAGE,
   submitStateHeadRecommendation,
   submitAdminDecision,
   listPendingRoyaltyRequests,
-  royaltyStatusBucket,
-  royaltyStatusLabel,
 } from '@/lib/royaltyApi';
-import type { Official, RoyaltyRequest } from '@/types';
-
-function formatDate(iso?: string): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-function isAlreadyClosedError(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 409;
-}
+import type { Official, RoyaltyRequest, Salon } from '@/types';
 
 export function RoyaltyApprovals() {
   const { showToast } = useToast();
   const { currentUser } = useApp();
   const admin = isAdmin(currentUser?.roles);
+  const isStateHead = !!currentUser?.roles.includes('STATE_HEAD');
+  const { official: myOfficial } = useMyOfficial();
 
   const [requests, setRequests] = useState<RoyaltyRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Reason is required for BOTH approve and reject per spec §8 — one modal covers both.
+  // Reason is required for BOTH approve and reject — one modal covers both.
   const [decisionModal, setDecisionModal] = useState<{ request: RoyaltyRequest; approved: boolean } | null>(null);
   const [decisionReason, setDecisionReason] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Response is IDs-only (no salonName) — resolved client-side since the pending
-  // queue is one page at a time (small N).
-  const [salonNames, setSalonNames] = useState<Record<string, string>>({});
   const [officials, setOfficials] = useState<Official[]>([]);
+  // Salons are only needed to check State Head assignment (the wire gives salonName).
+  const [salons, setSalons] = useState<Record<string, Salon>>({});
 
   const load = useCallback(() => {
     setLoading(true);
@@ -71,47 +61,65 @@ export function RoyaltyApprovals() {
   }, []);
 
   useEffect(() => {
-    const uniqueSalonIds = Array.from(new Set(requests.map((r) => r.salonId))).filter((sid) => !(sid in salonNames));
-    if (uniqueSalonIds.length === 0) return;
-    uniqueSalonIds.forEach((salonId) => {
+    if (!isStateHead) return;
+    const missing = Array.from(new Set(requests.map((r) => r.salonId))).filter((sid) => !(sid in salons));
+    missing.forEach((salonId) => {
       getSalon(salonId)
-        .then((salon) => setSalonNames((prev) => ({ ...prev, [salonId]: salon.name })))
-        .catch(() => setSalonNames((prev) => ({ ...prev, [salonId]: `Salon #${salonId}` })));
+        .then((salon) => setSalons((prev) => ({ ...prev, [salonId]: salon })))
+        .catch(() => undefined);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requests]);
+  }, [requests, isStateHead]);
 
-  const salonLabel = (r: RoyaltyRequest) => salonNames[r.salonId] ?? `Salon #${r.salonId}`;
+  const salonLabel = (r: RoyaltyRequest) => r.salonName ?? salons[r.salonId]?.name ?? `Salon #${r.salonId}`;
   const userName = (userId?: string) => {
     if (!userId) return '—';
     const o = officials.find((of) => of.userId === userId);
     return o ? o.name : `User #${userId}`;
   };
 
-  const decide = (id: string, approved: boolean, reason: string) =>
-    admin ? submitAdminDecision(id, approved, reason) : submitStateHeadRecommendation(id, approved, reason);
+  // Admin may decide from either pending state; the State Head only recommends, and
+  // only on requests for their own salon that still await them.
+  const canAdminDecide = (r: RoyaltyRequest) =>
+    admin && (r.overallStatus === 'PENDING_STATE_HEAD' || r.overallStatus === 'PENDING_ADMIN');
+  const canRecommend = (r: RoyaltyRequest) =>
+    !admin && isStateHead && r.overallStatus === 'PENDING_STATE_HEAD' && isSalonStateHead(myOfficial, salons[r.salonId]);
+
+  const closeModal = () => {
+    setDecisionModal(null);
+    setDecisionReason('');
+  };
 
   const handleDecision = async () => {
     if (!decisionModal || !decisionReason.trim()) return;
     const { request: r, approved } = decisionModal;
+    const reason = decisionReason.trim();
     setBusyId(r.id);
     try {
-      await decide(r.id, approved, decisionReason);
-      showToast(
-        'success',
-        admin
-          ? `Royalty change for ${salonLabel(r)} ${approved ? 'approved' : 'rejected'}.`
-          : `${approved ? 'Approval' : 'Rejection'} recommendation submitted for ${salonLabel(r)}.`,
-      );
-      setDecisionModal(null);
-      setDecisionReason('');
+      if (admin) {
+        await submitAdminDecision(r.id, approved, reason);
+        showToast('success', approved ? ROYALTY_APPROVED_MESSAGE : "Rejected. The salon's royalty terms are unchanged.");
+      } else {
+        await submitStateHeadRecommendation(r.id, approved, reason);
+        showToast(
+          'success',
+          `${approved ? 'Approval' : 'Rejection'} recommendation submitted for ${salonLabel(r)}. It now awaits an Admin decision.`,
+        );
+      }
+      closeModal();
       load();
     } catch (err) {
-      if (isAlreadyClosedError(err)) {
-        showToast('error', 'This request is no longer awaiting your decision.');
-        setDecisionModal(null);
-        setDecisionReason('');
+      if (err instanceof ApiError && (err.status === 409 || err.status === 404)) {
+        // Someone else moved this request on first (e.g. an Admin override closed it
+        // before the State Head recommended). Show why, drop the stale card.
+        const fallback = admin
+          ? 'This request has already been decided.'
+          : 'This request is no longer awaiting a State Head recommendation.';
+        showToast('error', err.message || fallback);
+        closeModal();
         load();
+      } else if (err instanceof ApiError && err.status === 403) {
+        showToast('error', admin ? 'Only an Admin can make this decision.' : 'You are not the assigned State Head for this salon.');
       } else {
         showToast('error', err instanceof ApiError ? err.message : 'Failed to submit decision.');
       }
@@ -132,11 +140,21 @@ export function RoyaltyApprovals() {
     );
   }
 
+  const heading = admin ? 'Pending Your Decision' : isStateHead ? 'Pending Your Recommendation' : 'Your Pending Requests';
+  const subheading = admin
+    ? 'Royalty change requests awaiting a final decision.'
+    : isStateHead
+      ? 'Royalty change requests on your salons awaiting your recommendation.'
+      : 'Royalty change requests you submitted that are still open.';
+
+  const isOverride = decisionModal?.request.overallStatus === 'PENDING_STATE_HEAD' && admin;
+  const verb = decisionModal?.approved ? 'Approve' : 'Reject';
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-ink">{admin ? 'Pending Your Decision' : 'Pending Your Recommendation'}</h1>
-        <p className="text-sm text-ink-secondary mt-1">Royalty change requests awaiting your input.</p>
+        <h1 className="text-xl font-bold text-ink">{heading}</h1>
+        <p className="text-sm text-ink-secondary mt-1">{subheading}</p>
       </div>
 
       <Card className="p-6">
@@ -146,55 +164,37 @@ export function RoyaltyApprovals() {
           <EmptyState title="Nothing pending your review right now" message="" icon={<Percent className="h-8 w-8" />} />
         ) : (
           <div className="divide-y divide-brand-50">
-            {requests.map((r) => (
-              <div key={r.id} className="py-4 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <p className="text-sm font-semibold text-ink">{salonLabel(r)}</p>
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-ink font-medium">
-                      {r.currentPercentage != null ? `${r.currentPercentage}%` : 'Not set'} → {r.newPercentage}%
-                    </span>
-                    <StatusBadge bucket={royaltyStatusBucket(r.overallStatus)} label={royaltyStatusLabel(r.overallStatus)} />
-                  </div>
-                </div>
-
-                {admin && r.stateHeadDecidedAt && (
-                  <p className="text-xs text-ink-secondary">
-                    State Head approved on {formatDate(r.stateHeadDecidedAt)} by {userName(r.stateHeadDecidedBy)}
-                    {r.stateHeadReason && ` — ${r.stateHeadReason}`}
-                  </p>
-                )}
-
-                <p className="text-sm text-ink">
-                  <span className="text-ink-secondary">Reason:</span> {r.reason || '—'}
-                  {r.instructedBy && <span className="text-ink-secondary"> · Instructed by: {r.instructedBy}</span>}
-                </p>
-                <p className="text-xs text-ink-secondary">
-                  Requested by {userName(r.requestedBy)} on {formatDate(r.createdAt)}
-                </p>
-                {!admin && (
-                  <p className="text-xs text-ink-secondary italic">
-                    Your recommendation will be sent to an Admin for a final decision.
-                  </p>
-                )}
-                {admin && (
-                  <p className="text-xs text-ink-secondary italic">
-                    No self-review block exists for this decision — please self-police if you are also the submitter.
-                  </p>
-                )}
-
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => setDecisionModal({ request: r, approved: true })} disabled={busyId === r.id}>
-                    <Check className="h-3.5 w-3.5" />
-                    {admin ? 'Approve' : 'Recommend Approve'}
-                  </Button>
-                  <Button size="sm" variant="danger" onClick={() => setDecisionModal({ request: r, approved: false })} disabled={busyId === r.id}>
-                    <X className="h-3.5 w-3.5" />
-                    {admin ? 'Reject' : 'Recommend Reject'}
-                  </Button>
-                </div>
-              </div>
-            ))}
+            {requests.map((r) => {
+              const adminActs = canAdminDecide(r);
+              const shActs = canRecommend(r);
+              return (
+                <RoyaltyRequestItem key={r.id} request={r} userName={userName} title={salonLabel(r)}>
+                  {adminActs && r.overallStatus === 'PENDING_STATE_HEAD' && (
+                    <p className="flex items-center gap-1.5 text-xs text-orange-700">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      The State Head hasn't recommended yet. Deciding now overrides and skips the State Head.
+                    </p>
+                  )}
+                  {shActs && (
+                    <p className="text-xs text-ink-secondary italic">
+                      Your recommendation is advisory. Either way, the request goes to an Admin for the final decision.
+                    </p>
+                  )}
+                  {(adminActs || shActs) && (
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => setDecisionModal({ request: r, approved: true })} disabled={busyId === r.id}>
+                        <Check className="h-3.5 w-3.5" />
+                        {admin ? 'Approve' : 'Recommend Approve'}
+                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => setDecisionModal({ request: r, approved: false })} disabled={busyId === r.id}>
+                        <X className="h-3.5 w-3.5" />
+                        {admin ? 'Reject' : 'Recommend Reject'}
+                      </Button>
+                    </div>
+                  )}
+                </RoyaltyRequestItem>
+              );
+            })}
           </div>
         )}
       </Card>
@@ -202,25 +202,42 @@ export function RoyaltyApprovals() {
       {/* Decision reason modal — required for both approve and reject */}
       <Modal
         open={!!decisionModal}
-        onClose={() => {
-          setDecisionModal(null);
-          setDecisionReason('');
-        }}
-        title={decisionModal?.approved ? 'Approve Royalty Change' : 'Reject Royalty Change'}
-        description={decisionModal ? `${decisionModal.approved ? 'Approve' : 'Reject'} the royalty change request for ${salonLabel(decisionModal.request)}.` : ''}
-        primaryLabel={busyId === decisionModal?.request.id ? 'Submitting...' : decisionModal?.approved ? 'Approve' : 'Reject'}
-        primaryVariant={decisionModal?.approved ? 'primary' : 'danger'}
+        onClose={closeModal}
+        title={
+          admin
+            ? `${verb} Royalty Change`
+            : decisionModal?.approved
+              ? 'Recommend Approval'
+              : 'Recommend Rejection'
+        }
+        description={
+          decisionModal
+            ? admin
+              ? `${verb} the royalty change for ${salonLabel(decisionModal.request)}. This decision is final.`
+              : `Send your recommendation for ${salonLabel(decisionModal.request)} to an Admin.`
+            : ''
+        }
+        primaryLabel={busyId === decisionModal?.request.id ? 'Submitting...' : admin ? verb : 'Submit Recommendation'}
+        primaryVariant={admin && !decisionModal?.approved ? 'danger' : 'primary'}
         primaryDisabled={!decisionReason.trim() || busyId === decisionModal?.request.id}
         onPrimary={handleDecision}
       >
-        <Textarea
-          label="Reason"
-          placeholder="Reason for this decision..."
-          rows={3}
-          value={decisionReason}
-          onChange={(e) => setDecisionReason(e.target.value)}
-          error={!decisionReason.trim() ? 'A reason is required.' : undefined}
-        />
+        <div className="space-y-4">
+          {isOverride && (
+            <div className="flex items-start gap-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>This skips the State Head. The request is still awaiting their recommendation, and deciding now records an override.</span>
+            </div>
+          )}
+          <Textarea
+            label="Reason"
+            placeholder="Reason for this decision..."
+            rows={3}
+            value={decisionReason}
+            onChange={(e) => setDecisionReason(e.target.value)}
+            error={!decisionReason.trim() ? 'A reason is required.' : undefined}
+          />
+        </div>
       </Modal>
     </div>
   );

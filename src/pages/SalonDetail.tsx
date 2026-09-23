@@ -29,12 +29,10 @@ import { getSalon, transferSalon } from '@/lib/salonsApi';
 import { searchFirms } from '@/lib/firmsApi';
 import { listOfficials } from '@/lib/officialsApi';
 import { searchAgreements, updateAgreement, renewAgreement, terminateAgreement } from '@/lib/agreementsApi';
-import {
-  submitRoyaltyRequest,
-  listRoyaltyHistory,
-  royaltyStatusBucket,
-  royaltyStatusLabel,
-} from '@/lib/royaltyApi';
+import { listRoyaltyHistory, formatRoyaltyValue, formatRoyaltyType } from '@/lib/royaltyApi';
+import { RoyaltyRequestItem } from '@/components/domain/RoyaltyRequestItem';
+import { RoyaltyRequestModal } from '@/components/domain/RoyaltyRequestModal';
+import { useMyOfficial, isAssignedToSalon, isSalonStateHead } from '@/hooks/useMyOfficial';
 import { ApiError } from '@/lib/api';
 import type { Agreement, Firm, Official, RoyaltyRequest, Salon, AgreementStatus } from '@/types';
 
@@ -82,8 +80,7 @@ export function SalonDetail() {
   const [royaltyHistory, setRoyaltyHistory] = useState<RoyaltyRequest[]>([]);
   const [royaltyHistoryLoading, setRoyaltyHistoryLoading] = useState(true);
   const [royaltyModal, setRoyaltyModal] = useState(false);
-  const [royaltyForm, setRoyaltyForm] = useState({ newPercentage: '', newRoyaltyType: '', reason: '', instructedBy: '' });
-  const [royaltyBusy, setRoyaltyBusy] = useState(false);
+  const { official: myOfficial } = useMyOfficial();
 
   const load = useCallback(() => {
     if (!id) return;
@@ -150,12 +147,16 @@ export function SalonDetail() {
     return { currentAgreement: active, historyAgreements: rest };
   }, [agreements]);
 
-  const currentRoyaltyPercentage = useMemo(() => {
+  // The salon's live terms are whatever the latest APPROVED request set them to.
+  const currentRoyalty = useMemo(() => {
     const approved = royaltyHistory.filter((r) => r.overallStatus === 'APPROVED');
     if (approved.length === 0) return null;
     const latest = approved.reduce((a, b) => (new Date(a.updatedAt) > new Date(b.updatedAt) ? a : b));
-    return latest.newPercentage;
+    return { value: latest.newValue, type: latest.newRoyaltyType };
   }, [royaltyHistory]);
+
+  // UX only — the backend enforces assignment with a 403.
+  const canRequestRoyaltyChange = isAssignedToSalon(myOfficial, salon);
 
   const handleTransfer = async () => {
     if (!salon || !newFirmId || !transferReason.trim()) return;
@@ -172,36 +173,6 @@ export function SalonDetail() {
       showToast('error', err instanceof ApiError ? err.message : 'Failed to transfer salon.');
     } finally {
       setBusy(false);
-    }
-  };
-
-  const handleRequestRoyaltyChange = async () => {
-    if (!salon || !royaltyForm.newPercentage.trim() || !royaltyForm.newRoyaltyType.trim() || !royaltyForm.reason.trim()) return;
-    setRoyaltyBusy(true);
-    try {
-      const created = await submitRoyaltyRequest(salon.id, {
-        newPercentage: Number(royaltyForm.newPercentage),
-        newRoyaltyType: royaltyForm.newRoyaltyType.trim(),
-        reason: royaltyForm.reason,
-        instructedBy: royaltyForm.instructedBy.trim() || undefined,
-      });
-      showToast(
-        'success',
-        created.skippedStateHeadStep
-          ? 'Submitted. As the assigned State Head, this skips the recommendation step and goes directly to Admin.'
-          : 'Royalty change request submitted for approval.',
-      );
-      setRoyaltyModal(false);
-      setRoyaltyForm({ newPercentage: '', newRoyaltyType: '', reason: '', instructedBy: '' });
-      loadRoyaltyHistory();
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        showToast('error', "You aren't the assigned Regional Manager, Cluster Manager, or State Head for this salon.");
-      } else {
-        showToast('error', err instanceof ApiError ? err.message : 'Failed to submit royalty change request.');
-      }
-    } finally {
-      setRoyaltyBusy(false);
     }
   };
 
@@ -344,14 +315,19 @@ export function SalonDetail() {
             <div>
               <p className="text-xs text-ink-secondary font-medium">Current Royalty</p>
               <p className="text-lg font-semibold text-ink">
-                {royaltyHistoryLoading ? '…' : currentRoyaltyPercentage != null ? `${currentRoyaltyPercentage}%` : 'Not set'}
+                {royaltyHistoryLoading ? '…' : currentRoyalty ? formatRoyaltyValue(currentRoyalty.value, currentRoyalty.type) : '—'}
+                {currentRoyalty && (
+                  <span className="ml-2 text-sm font-normal text-ink-secondary">{formatRoyaltyType(currentRoyalty.type)}</span>
+                )}
               </p>
             </div>
           </div>
-          <Button variant="secondary" onClick={() => setRoyaltyModal(true)}>
-            <Percent className="h-4 w-4" />
-            Request Royalty Change
-          </Button>
+          {canRequestRoyaltyChange && (
+            <Button variant="secondary" onClick={() => setRoyaltyModal(true)}>
+              <Percent className="h-4 w-4" />
+              Request Royalty Change
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -482,40 +458,7 @@ export function SalonDetail() {
         ) : (
           <div className="divide-y divide-brand-50 border-t border-brand-50">
             {royaltyHistory.map((r) => (
-              <div key={r.id} className="py-4 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="text-ink font-medium">
-                      {r.currentPercentage != null ? `${r.currentPercentage}%` : 'Not set'} → {r.newPercentage}%
-                    </span>
-                    <StatusBadge bucket={royaltyStatusBucket(r.overallStatus)} label={royaltyStatusLabel(r.overallStatus)} />
-                  </div>
-                  <span className="text-xs text-ink-secondary">{formatDate(r.createdAt)}</span>
-                </div>
-                <p className="text-sm text-ink">
-                  <span className="text-ink-secondary">Reason:</span> {r.reason || '—'}
-                  {r.instructedBy && <span className="text-ink-secondary"> · Instructed by: {r.instructedBy}</span>}
-                </p>
-                <div className="text-xs text-ink-secondary space-y-1">
-                  <p>Submitted by {userName(r.requestedBy)}</p>
-                  {r.skippedStateHeadStep && <p>Skipped the State Head recommendation step (submitter was the assigned State Head).</p>}
-                  {r.stateHeadDecidedAt && (
-                    <p>
-                      State Head {r.stateHeadDecision === 'APPROVED' ? 'approved' : 'rejected'} on{' '}
-                      {formatDate(r.stateHeadDecidedAt)} by {userName(r.stateHeadDecidedBy)}
-                      {r.stateHeadReason && ` — ${r.stateHeadReason}`}
-                    </p>
-                  )}
-                  {r.stateHeadDecision === 'APPROVED' && r.adminDecidedAt && (
-                    <p>
-                      Admin {r.adminDecision === 'APPROVED' ? 'approved' : 'rejected'} on{' '}
-                      {formatDate(r.adminDecidedAt)} by {userName(r.adminDecidedBy)}
-                      {r.adminReason && ` — ${r.adminReason}`}
-                    </p>
-                  )}
-                  {r.overallStatus === 'PENDING_ADMIN' && <p>Awaiting Admin decision.</p>}
-                </div>
-              </div>
+              <RoyaltyRequestItem key={r.id} request={r} userName={userName} />
             ))}
           </div>
         )}
@@ -562,57 +505,19 @@ export function SalonDetail() {
       </Modal>
 
       {/* Royalty change request modal */}
-      <Modal
+      <RoyaltyRequestModal
         open={royaltyModal}
-        onClose={() => {
+        onClose={() => setRoyaltyModal(false)}
+        salonId={salon.id}
+        salonName={salon.name}
+        currentValue={currentRoyalty?.value ?? null}
+        currentType={currentRoyalty?.type ?? null}
+        submitterIsStateHead={isSalonStateHead(myOfficial, salon)}
+        onSubmitted={() => {
           setRoyaltyModal(false);
-          setRoyaltyForm({ newPercentage: '', newRoyaltyType: '', reason: '', instructedBy: '' });
+          loadRoyaltyHistory();
         }}
-        title="Request Royalty Change"
-        description={`Submit a royalty change request for ${salon.name}. This goes to the State Head first, then Admin, for approval.`}
-        primaryLabel={royaltyBusy ? 'Submitting...' : 'Submit Request'}
-        primaryDisabled={!royaltyForm.newPercentage.trim() || !royaltyForm.newRoyaltyType.trim() || !royaltyForm.reason.trim() || royaltyBusy}
-        onPrimary={handleRequestRoyaltyChange}
-      >
-        <div className="space-y-4">
-          <Input
-            label="Current %"
-            value={currentRoyaltyPercentage != null ? `${currentRoyaltyPercentage}%` : 'Not set'}
-            disabled
-            className="opacity-60"
-          />
-          <Input
-            label="New %"
-            type="number"
-            min={0}
-            max={100}
-            step="0.01"
-            placeholder="E.g. 8.5"
-            value={royaltyForm.newPercentage}
-            onChange={(e) => setRoyaltyForm({ ...royaltyForm, newPercentage: e.target.value })}
-          />
-          <Input
-            label="New Royalty Type"
-            placeholder="E.g. PERCENTAGE_OF_REVENUE"
-            value={royaltyForm.newRoyaltyType}
-            onChange={(e) => setRoyaltyForm({ ...royaltyForm, newRoyaltyType: e.target.value })}
-          />
-          <Textarea
-            label="Why"
-            placeholder="Reason for this royalty change..."
-            rows={3}
-            value={royaltyForm.reason}
-            onChange={(e) => setRoyaltyForm({ ...royaltyForm, reason: e.target.value })}
-            error={!royaltyForm.reason.trim() && royaltyModal ? 'A reason is required.' : undefined}
-          />
-          <Input
-            label="Instructed by (optional)"
-            placeholder="E.g. Regional Head name"
-            value={royaltyForm.instructedBy}
-            onChange={(e) => setRoyaltyForm({ ...royaltyForm, instructedBy: e.target.value })}
-          />
-        </div>
-      </Modal>
+      />
 
       {/* Edit agreement modal — royaltyTerms is the ONLY editable field */}
       <Modal

@@ -22,11 +22,13 @@ import { OfficialsManagement } from '@/pages/OfficialsManagement';
 import { RoyaltyApprovals } from '@/pages/RoyaltyApprovals';
 import { FranchiseCreationDraftList } from '@/pages/FranchiseCreationDraftList';
 import { FranchiseCreationWizard } from '@/pages/FranchiseCreationWizard';
+import { NotificationsList } from '@/pages/NotificationsList';
 import { RequireRole } from '@/components/routing/RequireRole';
 import { ErrorBoundary } from '@/components/routing/ErrorBoundary';
 import { STAFF_ROLES, ADMIN_ROLES } from '@/lib/roles';
 
-const ROYALTY_APPROVAL_ROLES = ['STATE_HEAD', ...ADMIN_ROLES];
+// Admin decides, State Head recommends, RM/CM see their own open requests.
+const ROYALTY_APPROVAL_ROLES = STAFF_ROLES;
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { currentUser, mustChangePassword, authInitializing } = useApp();
@@ -71,6 +73,7 @@ function AppRoutes() {
       <Route path="/salon/:id" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><SalonDetail /></RequireRole></RequireAuth>} />
       <Route path="/admin-users" element={<RequireAuth><RequireRole roles={ADMIN_ROLES}><AdminUserManagement /></RequireRole></RequireAuth>} />
       <Route path="/officials" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><OfficialsManagement /></RequireRole></RequireAuth>} />
+      <Route path="/notifications" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><NotificationsList /></RequireRole></RequireAuth>} />
       <Route path="/royalty-approvals" element={<RequireAuth><RequireRole roles={ROYALTY_APPROVAL_ROLES}><RoyaltyApprovals /></RequireRole></RequireAuth>} />
       <Route path="/franchise-creation" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><FranchiseCreationDraftList /></RequireRole></RequireAuth>} />
       <Route path="/franchise-creation/new" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><FranchiseCreationWizard /></RequireRole></RequireAuth>} />

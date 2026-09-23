@@ -145,54 +145,49 @@ export interface CurrentUser {
   roles: string[];
 }
 
-export type RoyaltyDecisionState = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type RoyaltyType = 'VARIABLE' | 'FIXED' | 'ANNUALLY';
 
-/** overallStatus is a 4-state sequential pipeline, not two parallel tracks. */
-export type RoyaltyOverallStatus = 'PENDING' | 'PENDING_ADMIN' | 'APPROVED' | 'REJECTED';
+/** Server-computed State Head step state — render the step from this, never from the
+ * raw stateHeadRecommendation. */
+export type RoyaltyStateHeadStatus = 'PENDING' | 'SKIPPED' | 'APPROVED' | 'REJECTED';
+
+export type RoyaltyOverallStatus = 'PENDING_STATE_HEAD' | 'PENDING_ADMIN' | 'APPROVED' | 'REJECTED';
 
 /**
- * Response is IDs-only, no salonName/requestedByName field exists on the wire.
- * Components resolve display names from data they already have (salon context, a
- * loaded Officials list, etc.) rather than a field that doesn't exist. Spec §8's
- * submit body has no franchiseeId at all — royalty requests are salon-scoped, not
- * per-owner.
+ * RM/CM submits -> PENDING_STATE_HEAD; State Head submits -> PENDING_ADMIN with
+ * skippedStateHeadStep. The State Head's recommendation is advisory: it always moves
+ * the request to PENDING_ADMIN, approve or reject. Only Admin closes a request
+ * (APPROVED/REJECTED, final), and may do so while it is still PENDING_STATE_HEAD —
+ * an override, flagged by adminOverrodeStateHead.
  *
- * Approval is sequential, State-Head-first, not two independent parallel decisions:
- * PENDING (awaiting State Head only) -> State Head recommends -> PENDING_ADMIN
- * (awaiting Admin only; Admin never sees raw PENDING requests) -> Admin approves ->
- * APPROVED (final; salon's currentRoyaltyPercentage updates only here). A rejection
- * at either stage closes the request as REJECTED immediately and is final — Admin
- * never acts on a request the State Head rejected. If the submitter IS the salon's
- * assigned State Head, `skippedStateHeadStep` is true and the request starts at
- * PENDING_ADMIN directly. When overallStatus is REJECTED via a State Head rejection,
- * adminDecision still literally reads "PENDING" on the wire even though Admin never
- * got a turn; treat that as "stage never happened," not as an outstanding decision.
- * Each tier's decision is one-shot: re-deciding an already-decided tier, or acting
- * on a request that has moved past that tier, gets a 409 from the backend. Spec
- * confirms no self-review-conflict check exists on the Admin Decision endpoint —
- * don't build a UI block for it, just surface the submitter's identity.
+ * currentValue/currentRoyaltyType are server-snapshotted history fields, never sent
+ * by the client; null means "no terms recorded yet". newValue is a percentage for
+ * VARIABLE and a rupee amount for FIXED/ANNUALLY.
  */
 export interface RoyaltyRequest {
   id: string;
   salonId: string;
-  /** null only if the salon had never had a royalty % set before this request. */
-  currentPercentage: number | null;
-  newPercentage: number;
-  newRoyaltyType?: string;
+  salonName?: string;
+  currentValue: number | null;
+  newValue: number;
+  currentRoyaltyType: RoyaltyType | null;
+  newRoyaltyType: RoyaltyType;
   reason: string;
   instructedBy?: string;
   /** User id of the requester — resolve a display name client-side if needed. */
   requestedBy: string;
-  skippedStateHeadStep?: boolean;
-  overallStatus: RoyaltyOverallStatus;
-  stateHeadDecision: RoyaltyDecisionState;
+  skippedStateHeadStep: boolean;
+  stateHeadStatus: RoyaltyStateHeadStatus;
+  stateHeadRecommendation?: string;
+  stateHeadReason?: string;
   stateHeadDecidedBy?: string;
   stateHeadDecidedAt?: string;
-  stateHeadReason?: string;
-  adminDecision: RoyaltyDecisionState;
+  adminDecision?: 'APPROVED' | 'REJECTED';
+  adminReason?: string;
   adminDecidedBy?: string;
   adminDecidedAt?: string;
-  adminReason?: string;
+  adminOverrodeStateHead: boolean;
+  overallStatus: RoyaltyOverallStatus;
   createdAt: string;
   updatedAt: string;
 }

@@ -315,6 +315,21 @@ export async function createAdminUser(input: { email: string; roleName: string }
   return adaptAdminUser(data);
 }
 
+/** PATCH /api/v1/admin/users/{id} — admin only. Body is {email, roleName}. */
+export async function updateAdminUser(id: string, input: { email: string; roleName: string }): Promise<AdminUser> {
+  const data = await request<RawUserResponse>(`/admin/users/${id}`, {
+    method: 'PATCH',
+    body: { email: input.email, roleName: input.roleName },
+  });
+  return adaptAdminUser(data);
+}
+
+/** DELETE /api/v1/admin/users/{id} — admin only. Not a hard delete: the backend
+ * disables the account and revokes all sessions; the record stays for history. */
+export async function deleteAdminUser(id: string): Promise<void> {
+  await request(`/admin/users/${id}`, { method: 'DELETE' });
+}
+
 /** GET /api/v1/admin/users — admin only. roleName is comma-joined if a user holds
  * multiple roles. */
 export async function listAdminUsers(): Promise<AdminUser[]> {

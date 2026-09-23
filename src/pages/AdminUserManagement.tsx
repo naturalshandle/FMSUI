@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { UserPlus, Shield } from 'lucide-react';
+import { UserPlus, Shield, Pencil, UserX } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -13,6 +13,7 @@ import * as api from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import type { AdminUser } from '@/types';
 import { roleLabels, STAFF_ROLES } from '@/lib/roles';
+import { useApp } from '@/context/AppContext';
 
 const roleBadgeColors: Record<string, string> = {
   SUPER_ADMIN: 'bg-brand-600',
@@ -24,6 +25,7 @@ const roleBadgeColors: Record<string, string> = {
 
 export function AdminUserManagement() {
   const { showToast } = useToast();
+  const { currentUser } = useApp();
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -31,6 +33,17 @@ export function AdminUserManagement() {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ email: '', role: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [editModal, setEditModal] = useState<AdminUser | null>(null);
+  const [editForm, setEditForm] = useState({ email: '', role: '' });
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const [deleteModal, setDeleteModal] = useState<AdminUser | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const isSelf = (u: AdminUser) =>
+    !!currentUser && (u.id === currentUser.userId || u.email.toLowerCase() === currentUser.email?.toLowerCase());
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -74,6 +87,64 @@ export function AdminUserManagement() {
     }
   };
 
+  const openEdit = (u: AdminUser) => {
+    setEditModal(u);
+    setEditForm({ email: u.email, role: u.roleName });
+    setEditErrors({});
+  };
+
+  const handleEdit = async () => {
+    if (!editModal) return;
+    const e: Record<string, string> = {};
+    if (!editForm.email.trim()) e.email = 'Email is required';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editForm.email)) e.email = 'Enter a valid email';
+    if (!editForm.role) e.role = 'Role is required';
+    setEditErrors(e);
+    if (Object.keys(e).length > 0) return;
+
+    setSaving(true);
+    try {
+      await api.updateAdminUser(editModal.id, { email: editForm.email.trim(), roleName: editForm.role });
+      showToast('success', 'User updated.');
+      setEditModal(null);
+      loadUsers();
+    } catch (err) {
+      showToast('error', err instanceof ApiError ? err.message : 'Failed to update user.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteModal) return;
+    setDeleting(true);
+    try {
+      await api.deleteAdminUser(deleteModal.id);
+      showToast('success', `${deleteModal.email} has been deactivated.`);
+      setDeleteModal(null);
+      loadUsers();
+    } catch (err) {
+      showToast('error', err instanceof ApiError ? err.message : 'Failed to deactivate user.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const renderActions = (user: AdminUser) => (
+    <div className="flex items-center justify-end gap-1.5">
+      <Button size="sm" variant="ghost" onClick={() => openEdit(user)}>
+        <Pencil className="h-3.5 w-3.5" />
+        Edit
+      </Button>
+      {!isSelf(user) && (
+        <Button size="sm" variant="danger" onClick={() => setDeleteModal(user)}>
+          <UserX className="h-3.5 w-3.5" />
+          Deactivate
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -111,6 +182,7 @@ export function AdminUserManagement() {
                     <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">
                       Role
                     </th>
+                    <th className="px-3 py-3" />
                   </tr>
                 </thead>
                 <tbody>
@@ -133,6 +205,7 @@ export function AdminUserManagement() {
                           <UserStatusBadge status={user.status} />
                         </div>
                       </td>
+                      <td className="px-3 py-4">{renderActions(user)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -156,6 +229,7 @@ export function AdminUserManagement() {
                     </span>
                     <UserStatusBadge status={user.status} />
                   </div>
+                  <div className="mt-3">{renderActions(user)}</div>
                 </div>
               ))}
             </div>
@@ -194,6 +268,55 @@ export function AdminUserManagement() {
               </option>
             ))}
           </Select>
+        </div>
+      </Modal>
+
+      {/* Edit user modal */}
+      <Modal
+        open={!!editModal}
+        onClose={() => setEditModal(null)}
+        title="Edit Admin User"
+        description={editModal ? `Update the email or role for ${editModal.email}.` : ''}
+        primaryLabel={saving ? 'Saving...' : 'Save Changes'}
+        primaryDisabled={!editForm.email || !editForm.role || saving}
+        onPrimary={handleEdit}
+      >
+        <div className="space-y-4">
+          <Input
+            label="Email"
+            type="email"
+            value={editForm.email}
+            onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+            error={editErrors.email}
+          />
+          <Select label="Role" value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}>
+            {/* Keep a user's current value selectable even if it isn't a single staff role (e.g. comma-joined). */}
+            {editModal && !(STAFF_ROLES as readonly string[]).includes(editModal.roleName) && (
+              <option value={editModal.roleName}>{roleLabels[editModal.roleName] ?? editModal.roleName}</option>
+            )}
+            {STAFF_ROLES.map((r) => (
+              <option key={r} value={r}>
+                {roleLabels[r]}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </Modal>
+
+      {/* Deactivate user modal */}
+      <Modal
+        open={!!deleteModal}
+        onClose={() => setDeleteModal(null)}
+        title="Deactivate User"
+        description={deleteModal ? `Deactivate ${deleteModal.email}?` : ''}
+        primaryLabel={deleting ? 'Deactivating...' : 'Deactivate'}
+        primaryVariant="danger"
+        primaryDisabled={deleting}
+        onPrimary={handleDelete}
+      >
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          This account will be disabled and logged out everywhere. The user record is kept for history, and will show
+          as Disabled in this list.
         </div>
       </Modal>
     </div>

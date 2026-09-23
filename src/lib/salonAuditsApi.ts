@@ -1,4 +1,4 @@
-import { request } from '@/lib/api';
+import { API_BASE_URL, ApiError, getAccessToken, request } from '@/lib/api';
 import { uploadMultipart } from '@/lib/uploads';
 
 export type SalonAuditStatus = 'IN_PROGRESS' | 'SUBMITTED';
@@ -116,6 +116,30 @@ export async function uploadAuditPhoto(id: string, areaLabel: string, file: File
     uploadedByUserId: String(p.uploadedByUserId),
     uploadedAt: p.uploadedAt,
   };
+}
+
+/** GET /api/v1/salon-audits/{auditId}/photos/{photoId}/download — raw image bytes
+ * (Content-Disposition: inline, Content-Type: application/octet-stream). Fetched
+ * as a blob with the auth header (same pattern as documentsApi.downloadDocument)
+ * since a plain <img src> can't carry the Bearer token; the caller turns the blob
+ * into an object URL for display. Viewing is unscoped by role — any staff role
+ * that can load the audit detail can view its photos. */
+export async function fetchAuditPhotoBlob(auditId: string, photoId: string): Promise<Blob> {
+  const token = getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}/salon-audits/${auditId}/photos/${photoId}/download`, { headers });
+  } catch {
+    throw new ApiError(0, 'Cannot reach the server to load the photo.');
+  }
+  if (!res.ok) {
+    if (res.status === 404) throw new ApiError(404, 'This photo is no longer available.');
+    throw new ApiError(res.status, `Failed to load photo (status ${res.status}).`);
+  }
+  return res.blob();
 }
 
 /** POST /api/v1/salon-audits/{id}/submit — no body. Requires >=1 uploaded photo

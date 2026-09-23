@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Camera, Plus, Upload, Send, CheckCircle2, Flag } from 'lucide-react';
+import { Camera, Plus, Upload, Send, CheckCircle2, Flag, Eye, X, Loader2 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -17,6 +17,7 @@ import {
   uploadAuditPhoto,
   submitAudit,
   reviewSalonAudit,
+  fetchAuditPhotoBlob,
   type SalonAudit,
   type SalonAuditDetail,
   type SalonAuditReviewStatus,
@@ -66,6 +67,8 @@ export function SalonAuditsSection({ salonId }: Props) {
   const [reviewModal, setReviewModal] = useState<SalonAuditReviewStatus | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewBusy, setReviewBusy] = useState(false);
+
+  const [photoViewer, setPhotoViewer] = useState<{ fileName: string; url: string | null; error: string | null } | null>(null);
 
   const loadList = () => {
     setLoading(true);
@@ -154,6 +157,37 @@ export function SalonAuditsSection({ salonId }: Props) {
     }
   };
 
+  const closePhotoViewer = () => {
+    setPhotoViewer((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  };
+
+  const handleViewPhoto = async (photoId: string, fileName: string) => {
+    if (!selected) return;
+    setPhotoViewer((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return { fileName, url: null, error: null };
+    });
+    try {
+      const blob = await fetchAuditPhotoBlob(selected.id, photoId);
+      const url = URL.createObjectURL(blob);
+      setPhotoViewer({ fileName, url, error: null });
+    } catch (err) {
+      setPhotoViewer({ fileName, url: null, error: err instanceof ApiError ? err.message : 'Failed to load photo.' });
+    }
+  };
+
+  useEffect(() => {
+    if (!photoViewer) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closePhotoViewer();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [photoViewer]);
+
   const isConductor = selected && currentUser?.userId === selected.conductedByUserId;
   const canUpload = selected?.status === 'IN_PROGRESS' && (isConductor || admin);
   const canReview = selected?.status === 'SUBMITTED' && (admin || !isConductor);
@@ -220,9 +254,19 @@ export function SalonAuditsSection({ salonId }: Props) {
                 <p className="text-xs font-medium text-ink-secondary mb-2">{area}</p>
                 <div className="flex flex-wrap gap-2">
                   {photos.map((p) => (
-                    <span key={p.id} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs text-ink">
+                    <span key={p.id} className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 pl-2.5 pr-1.5 py-1.5 text-xs text-ink">
                       <Camera className="h-3 w-3" />
                       {p.fileName}
+                      <button
+                        type="button"
+                        onClick={() => handleViewPhoto(p.id, p.fileName)}
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-brand-700 hover:bg-brand-100 transition-colors"
+                        title="View photo"
+                        aria-label={`View ${p.fileName}`}
+                      >
+                        <Eye className="h-3 w-3" />
+                        View
+                      </button>
                     </span>
                   ))}
                 </div>
@@ -311,6 +355,36 @@ export function SalonAuditsSection({ salonId }: Props) {
           error={reviewModal === 'FLAGGED' && !reviewNotes.trim() ? 'Notes are required when flagging an audit.' : undefined}
         />
       </Modal>
+
+      {photoViewer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-ink/60 backdrop-blur-sm animate-fade-in" onClick={closePhotoViewer} />
+          <div className="relative max-w-3xl max-h-[85vh] w-full flex flex-col items-center animate-slide-up">
+            <div className="w-full flex items-center justify-between mb-2 px-1">
+              <p className="text-sm font-medium text-white truncate pr-3">{photoViewer.fileName}</p>
+              <button
+                onClick={closePhotoViewer}
+                className="rounded-lg p-1.5 text-white hover:bg-white/10 transition-colors shrink-0"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="relative bg-white rounded-2xl shadow-xl overflow-hidden flex items-center justify-center w-full max-h-[75vh] min-h-[200px]">
+              {photoViewer.error ? (
+                <p className="text-sm text-red-600 p-6 text-center">{photoViewer.error}</p>
+              ) : photoViewer.url ? (
+                <img src={photoViewer.url} alt={photoViewer.fileName} className="max-w-full max-h-[75vh] object-contain" />
+              ) : (
+                <div className="flex items-center gap-2 text-ink-secondary p-6">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading photo...
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

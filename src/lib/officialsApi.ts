@@ -109,6 +109,22 @@ export class OfficialInUseError extends Error {
   }
 }
 
+/**
+ * POST /api/v1/admin/officials/{id}/reassign-salons — admin only. Moves every salon
+ * where {id} is cluster/regional/state head to replacementOfficialId, which the
+ * backend requires to be a different official of the same type. Validation errors
+ * (400/404) surface as ApiError with the server's message.
+ */
+export async function reassignOfficialSalons(
+  id: string,
+  replacementOfficialId: number,
+): Promise<{ salonsReassigned: number }> {
+  return request<{ salonsReassigned: number }>(`/admin/officials/${id}/reassign-salons`, {
+    method: 'POST',
+    body: { replacementOfficialId },
+  });
+}
+
 export async function deleteOfficial(id: string): Promise<void> {
   try {
     await request(`/admin/officials/${id}`, { method: 'DELETE' });

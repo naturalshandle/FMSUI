@@ -16,6 +16,7 @@ import { useApp } from '@/context/AppContext';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
+import { HomeMenu } from '@/components/domain/HomeMenu';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { getDashboard } from '@/lib/dashboardApi';
@@ -68,6 +69,7 @@ export function HomeDashboard() {
             <ClipboardCheck className="h-4 w-4" />
             Go to Directory
           </Button>
+          <HomeMenu />
         </div>
       </div>
 

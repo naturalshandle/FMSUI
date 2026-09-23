@@ -18,6 +18,7 @@ import {
   updateOfficial,
   linkUserToOfficial,
   deleteOfficial,
+  reassignOfficialSalons,
   OfficialInUseError,
 } from '@/lib/officialsApi';
 import { listAdminUsers, ApiError } from '@/lib/api';
@@ -74,6 +75,41 @@ export function OfficialsManagement() {
 
   const [deleteModal, setDeleteModal] = useState<Official | null>(null);
   const [deleteBlockedCount, setDeleteBlockedCount] = useState<number | null>(null);
+  // Set once DELETE returns 409 (official still assigned to salons); switches the
+  // delete modal into the "pick a replacement, unassign & delete" flow.
+  const [deleteInUse, setDeleteInUse] = useState(false);
+  const [replacementId, setReplacementId] = useState<string | null>(null);
+  const [replacementCandidates, setReplacementCandidates] = useState<Official[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
+
+  const resetDeleteState = () => {
+    setDeleteModal(null);
+    setDeleteBlockedCount(null);
+    setDeleteInUse(false);
+    setReplacementId(null);
+    setCandidatesError(null);
+  };
+
+  useEffect(() => {
+    if (!deleteModal || !deleteInUse) return;
+    let cancelled = false;
+    setCandidatesLoading(true);
+    setCandidatesError(null);
+    listOfficials({ officialType: deleteModal.officialType, size: 200 })
+      .then((p) => {
+        if (!cancelled) setReplacementCandidates(p.content.filter((o) => o.id !== deleteModal.id));
+      })
+      .catch((err) => {
+        if (!cancelled) setCandidatesError(err instanceof ApiError ? err.message : 'Failed to load officials.');
+      })
+      .finally(() => {
+        if (!cancelled) setCandidatesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deleteModal, deleteInUse]);
 
   // Reuses the same GET /api/v1/admin/users the Admin Users page lists from —
   // no second endpoint. Filtered to users holding the role matching this
@@ -210,16 +246,36 @@ export function OfficialsManagement() {
     try {
       await deleteOfficial(deleteModal.id);
       showToast('success', `${deleteModal.name} deleted.`);
-      setDeleteModal(null);
-      setDeleteBlockedCount(null);
+      resetDeleteState();
       reload();
     } catch (err) {
       if (err instanceof OfficialInUseError) {
         setDeleteBlockedCount(err.count ?? null);
+        setDeleteInUse(true);
       } else {
         showToast('error', err instanceof ApiError ? err.message : 'Failed to delete official.');
-        setDeleteModal(null);
+        resetDeleteState();
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUnassignAndDelete = async () => {
+    if (!deleteModal || !replacementId) return;
+    setSaving(true);
+    try {
+      const { salonsReassigned } = await reassignOfficialSalons(deleteModal.id, Number(replacementId));
+      await deleteOfficial(deleteModal.id);
+      showToast(
+        'success',
+        `${salonsReassigned} salon${salonsReassigned === 1 ? '' : 's'} reassigned and ${deleteModal.name} deleted.`,
+      );
+      resetDeleteState();
+      reload();
+    } catch (err) {
+      // Stop on the first failure: a failed reassignment never proceeds to delete.
+      showToast('error', err instanceof ApiError || err instanceof OfficialInUseError ? err.message : 'Failed to unassign and delete official.');
     } finally {
       setSaving(false);
     }
@@ -334,7 +390,7 @@ export function OfficialsManagement() {
                           <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button size="sm" variant="danger" onClick={() => { setDeleteModal(o); setDeleteBlockedCount(null); }}>
+                          <Button size="sm" variant="danger" onClick={() => { resetDeleteState(); setDeleteModal(o); }}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -475,21 +531,46 @@ export function OfficialsManagement() {
       {/* Delete modal (admin only) */}
       <Modal
         open={!!deleteModal}
-        onClose={() => {
-          setDeleteModal(null);
-          setDeleteBlockedCount(null);
-        }}
-        title="Delete Official"
+        onClose={resetDeleteState}
+        title={deleteInUse ? 'Unassign & Delete Official' : 'Delete Official'}
         description={deleteModal ? `Delete ${deleteModal.name}? This cannot be undone.` : ''}
-        primaryLabel={saving ? 'Deleting...' : 'Delete'}
+        primaryLabel={saving ? (deleteInUse ? 'Unassigning...' : 'Deleting...') : deleteInUse ? 'Unassign & Delete' : 'Delete'}
         primaryVariant="danger"
-        primaryDisabled={saving || deleteBlockedCount != null}
-        onPrimary={handleDelete}
+        primaryDisabled={saving || (deleteInUse && !replacementId)}
+        onPrimary={deleteInUse ? handleUnassignAndDelete : handleDelete}
       >
-        {deleteBlockedCount != null ? (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-status-rejected">
-            This official is currently assigned to {deleteBlockedCount} salon{deleteBlockedCount === 1 ? '' : 's'}.
-            Reassign {deleteBlockedCount === 1 ? 'that salon' : 'those salons'} to a different official before deleting.
+        {deleteInUse && deleteModal ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-status-rejected">
+              {deleteBlockedCount != null
+                ? `This official is currently assigned to ${deleteBlockedCount} salon${deleteBlockedCount === 1 ? '' : 's'}.`
+                : 'This official is currently assigned to one or more salons.'}{' '}
+              Choose a replacement {officialTypeLabels[deleteModal.officialType] ?? deleteModal.officialType} to take
+              over {deleteBlockedCount === 1 ? 'that salon' : 'those salons'}. Confirming will reassign them and then
+              permanently delete {deleteModal.name}.
+            </div>
+            {candidatesLoading ? (
+              <p className="text-sm text-ink-secondary">Loading officials...</p>
+            ) : candidatesError ? (
+              <p className="text-sm text-status-rejected">{candidatesError}</p>
+            ) : replacementCandidates.length === 0 ? (
+              <p className="text-sm text-ink-secondary">
+                No other {officialTypeLabels[deleteModal.officialType] ?? deleteModal.officialType} exists to take over.
+                Add one first.
+              </p>
+            ) : (
+              <SearchableSelect
+                label="Replacement official"
+                placeholder="Select by name..."
+                options={replacementCandidates.map((o) => ({
+                  value: o.id,
+                  label: o.region ? `${o.name} — ${o.region}` : o.name,
+                }))}
+                value={replacementId}
+                onChange={setReplacementId}
+                emptyMessage="No officials match your search."
+              />
+            )}
           </div>
         ) : (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">

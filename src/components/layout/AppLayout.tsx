@@ -14,9 +14,10 @@ import {
 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
-import { ADMIN_ROLES, roleLabels } from '@/lib/roles';
+import { NotificationBell } from '@/components/domain/NotificationBell';
+import { ADMIN_ROLES, STAFF_ROLES, roleLabels } from '@/lib/roles';
 
-const ROYALTY_APPROVAL_ROLES = ['STATE_HEAD', ...ADMIN_ROLES];
+const ROYALTY_APPROVAL_ROLES = STAFF_ROLES;
 
 const navItems = [
   { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
@@ -55,14 +56,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen bg-surface-base">
       {/* Sidebar */}
       <aside className="hidden md:flex w-64 shrink-0 flex-col bg-white border-r border-brand-100">
-        <div className="flex items-center gap-2.5 px-6 py-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-400 text-white">
-            <Sparkles className="h-5 w-5" />
+        <div className="flex items-center justify-between gap-2.5 px-6 py-5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-600 to-brand-400 text-white">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-ink leading-tight">Naturals FMS</p>
+              <p className="text-xs text-ink-secondary">Admin Console</p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-bold text-ink leading-tight">Naturals FMS</p>
-            <p className="text-xs text-ink-secondary">Admin Console</p>
-          </div>
+          <NotificationBell />
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
@@ -112,7 +116,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
           <span className="text-sm font-bold text-ink">Naturals FMS</span>
         </div>
-        <Avatar initials={getInitials(displayName(currentUser?.email) || 'A U')} size="sm" />
+        <div className="flex items-center gap-1.5">
+          <NotificationBell />
+          <Avatar initials={getInitials(displayName(currentUser?.email) || 'A U')} size="sm" />
+        </div>
       </div>
 
       {/* Mobile bottom nav */}
