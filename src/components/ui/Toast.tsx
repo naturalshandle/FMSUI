@@ -43,11 +43,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-3">
+      <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:bottom-6 sm:right-6 z-[60] flex flex-col items-stretch sm:items-end gap-3">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="flex items-center gap-3 bg-white rounded-xl shadow-lg border border-brand-100 px-4 py-3 animate-slide-in-right min-w-[300px] max-w-md"
+            className="flex items-center gap-3 bg-white rounded-xl shadow-lg border border-brand-100 px-4 py-3 animate-slide-in-right w-full sm:w-auto sm:min-w-[300px] sm:max-w-md"
           >
             {iconMap[t.kind]}
             <p className="text-sm text-ink flex-1">{t.message}</p>

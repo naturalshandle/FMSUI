@@ -347,60 +347,104 @@ export function OfficialsManagement() {
             />
           )
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-brand-100 bg-surface-subtle/50">
-                  <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-6 py-3">Name</th>
-                  <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Type</th>
-                  <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Region</th>
-                  <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Contact</th>
-                  <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Linked User</th>
-                  {admin && <th className="px-3 py-3" />}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((o) => (
-                  <tr key={o.id} className="border-b border-brand-50 last:border-0 hover:bg-brand-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm font-medium text-ink">{o.name}</td>
-                    <td className="px-3 py-4">
-                      <Badge kind="DRAFT" label={officialTypeLabels[o.officialType] ?? o.officialType} />
-                    </td>
-                    <td className="px-3 py-4 text-sm text-ink-secondary">{o.region || '—'}</td>
-                    <td className="px-3 py-4 text-sm text-ink-secondary">{o.contact}</td>
-                    <td className="px-3 py-4">
-                      {o.userId ? (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-status-verified font-medium">Linked (User #{o.userId})</span>
-                          <UserStatusBadge status={o.status} />
-                        </div>
-                      ) : (
-                        <span className="text-xs text-ink-secondary">Not linked</span>
-                      )}
-                    </td>
-                    {admin && (
-                      <td className="px-3 py-4">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {!o.userId && (
-                            <Button size="sm" variant="ghost" onClick={() => setLinkModal(o)}>
-                              <Link2 className="h-3.5 w-3.5" />
-                              Link User
-                            </Button>
-                          )}
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button size="sm" variant="danger" onClick={() => { resetDeleteState(); setDeleteModal(o); }}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      </td>
-                    )}
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-brand-100 bg-surface-subtle/50">
+                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-6 py-3">Name</th>
+                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Type</th>
+                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Region</th>
+                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Contact</th>
+                    <th className="text-left text-xs font-semibold text-ink-secondary uppercase tracking-wider px-3 py-3">Linked User</th>
+                    {admin && <th className="px-3 py-3" />}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((o) => (
+                    <tr key={o.id} className="border-b border-brand-50 last:border-0 hover:bg-brand-50/50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-medium text-ink">{o.name}</td>
+                      <td className="px-3 py-4">
+                        <Badge kind="DRAFT" label={officialTypeLabels[o.officialType] ?? o.officialType} />
+                      </td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">{o.region || '—'}</td>
+                      <td className="px-3 py-4 text-sm text-ink-secondary">{o.contact}</td>
+                      <td className="px-3 py-4">
+                        {o.userId ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-status-verified font-medium">Linked (User #{o.userId})</span>
+                            <UserStatusBadge status={o.status} />
+                          </div>
+                        ) : (
+                          <span className="text-xs text-ink-secondary">Not linked</span>
+                        )}
+                      </td>
+                      {admin && (
+                        <td className="px-3 py-4">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {!o.userId && (
+                              <Button size="sm" variant="ghost" onClick={() => setLinkModal(o)}>
+                                <Link2 className="h-3.5 w-3.5" />
+                                Link User
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button size="sm" variant="danger" onClick={() => { resetDeleteState(); setDeleteModal(o); }}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-brand-50">
+              {filtered.map((o) => (
+                <div key={o.id} className="p-4">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="text-sm font-medium text-ink">{o.name}</p>
+                    <Badge kind="DRAFT" label={officialTypeLabels[o.officialType] ?? o.officialType} />
+                  </div>
+                  <p className="text-xs text-ink-secondary">{o.region || '—'} {o.contact && `· ${o.contact}`}</p>
+                  <div className="mt-2">
+                    {o.userId ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-status-verified font-medium">Linked (User #{o.userId})</span>
+                        <UserStatusBadge status={o.status} />
+                      </div>
+                    ) : (
+                      <span className="text-xs text-ink-secondary">Not linked</span>
+                    )}
+                  </div>
+                  {admin && (
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      {!o.userId && (
+                        <Button size="sm" variant="ghost" onClick={() => setLinkModal(o)}>
+                          <Link2 className="h-3.5 w-3.5" />
+                          Link User
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(o)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => { resetDeleteState(); setDeleteModal(o); }}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </Card>
 

@@ -16,6 +16,8 @@ export type NotificationType =
   | 'SALON_TRANSFERRED'
   | 'AGREEMENT_RENEWED'
   | 'AGREEMENT_TERMINATED'
+  | 'AGREEMENT_EXPIRING_SOON'
+  | 'AGREEMENT_EXPIRED'
   | 'DOCUMENT_VERIFIED'
   | 'DOCUMENT_REJECTED'
   | 'DOCUMENT_REPLACED'
@@ -102,9 +104,9 @@ export async function markAllNotificationsRead(): Promise<void> {
 
 /** Maps a notification's related entity to an existing detail-page route. Only
  * entity types with a standalone route addressable by that id alone are wired
- * (SALON, FIRM); ROYALTY_CHANGE_REQUEST goes to the approvals list since there's
- * no per-request detail route. AGREEMENT, FRANCHISE_DOCUMENT and SALON_AUDIT have
- * no route reachable from their id alone today, so they resolve to null and the
+ * (SALON, FIRM, AGREEMENT); ROYALTY_CHANGE_REQUEST goes to the approvals list since
+ * there's no per-request detail route. FRANCHISE_DOCUMENT and SALON_AUDIT have no
+ * route reachable from their id alone today, so they resolve to null and the
  * notification is just marked read without navigating. */
 export function getNotificationLink(n: Pick<Notification, 'relatedEntityType' | 'relatedEntityId'>): string | null {
   if (!n.relatedEntityType || !n.relatedEntityId) return null;
@@ -113,6 +115,9 @@ export function getNotificationLink(n: Pick<Notification, 'relatedEntityType' | 
       return `/salon/${n.relatedEntityId}`;
     case 'FIRM':
       return `/firm/${n.relatedEntityId}`;
+    case 'AGREEMENT':
+      // Same path the expiry-reminder emails link to — keep them in sync.
+      return `/agreements/${n.relatedEntityId}`;
     case 'ROYALTY_CHANGE_REQUEST':
       return '/royalty-approvals';
     default:

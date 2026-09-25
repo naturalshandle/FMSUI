@@ -7,9 +7,12 @@ export interface AgreementSearchParams {
   status?: string;
   page?: number;
   size?: number;
+  /** Spring sort spec, e.g. "validTill,asc". validTill is ISO yyyy-MM-dd text, so
+   * lexical order is chronological. */
+  sort?: string;
 }
 
-/** GET /api/v1/agreements?salonId=&status=&page=&size= — spec §6. `status` must be
+/** GET /api/v1/agreements?salonId=&status=&page=&size=&sort= — spec §6. `status` must be
  * a valid enum value via a select, never free text. */
 export async function searchAgreements(params: AgreementSearchParams = {}): Promise<Page<Agreement>> {
   const qs = new URLSearchParams();
@@ -17,6 +20,7 @@ export async function searchAgreements(params: AgreementSearchParams = {}): Prom
   if (params.status) qs.set('status', params.status);
   qs.set('page', String(params.page ?? 0));
   qs.set('size', String(params.size ?? 20));
+  if (params.sort) qs.set('sort', params.sort);
   return request<Page<Agreement>>(`/agreements?${qs.toString()}`);
 }
 

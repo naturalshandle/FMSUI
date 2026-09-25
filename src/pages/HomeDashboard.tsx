@@ -17,11 +17,12 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Avatar, getInitials } from '@/components/ui/Avatar';
 import { HomeMenu } from '@/components/domain/HomeMenu';
+import { ExpiringAgreementsWidget } from '@/components/domain/ExpiringAgreementsWidget';
 import { SkeletonCards } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { getDashboard } from '@/lib/dashboardApi';
 import { ApiError } from '@/lib/api';
-import { roleLabels } from '@/lib/roles';
+import { roleLabels, isAdmin } from '@/lib/roles';
 import type { DashboardData } from '@/types';
 
 function displayName(email?: string): string {
@@ -110,6 +111,9 @@ export function HomeDashboard() {
               <Segment label="Superseded" value={stats.agreementsByStatus.superseded} tone="gray" />
             </div>
           </Card>
+
+          {/* Admins receive the expiry reminders, so they get the actionable list. */}
+          {isAdmin(currentUser?.roles) && <ExpiringAgreementsWidget expiredCount={stats.agreementsByStatus.expired} />}
 
           {/* Royalty breakdown */}
           <Card className="p-6">

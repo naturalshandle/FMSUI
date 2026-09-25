@@ -1,15 +1,17 @@
 import { useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ShieldCheck, ArrowRight } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { getPostLoginPath, forwardAuthRedirect } from '@/lib/authRedirect';
 
 const TOTP_PATTERN = /^\d{6}$/;
 
 export function MfaVerifyScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { pendingMfa, verifyMfaLogin, cancelMfa, redirectToMfaSetup } = useApp();
   const [totp, setTotp] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -17,12 +19,12 @@ export function MfaVerifyScreen() {
   const [loading, setLoading] = useState(false);
 
   if (!pendingMfa || pendingMfa.kind !== 'VERIFY') {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={forwardAuthRedirect(location.state)} />;
   }
 
   const handleBackToLogin = () => {
     cancelMfa();
-    navigate('/login', { replace: true });
+    navigate('/login', { replace: true, state: forwardAuthRedirect(location.state) });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -35,13 +37,13 @@ export function MfaVerifyScreen() {
     setLoading(true);
     try {
       await verifyMfaLogin(totp);
-      navigate('/');
+      navigate(getPostLoginPath(location.state));
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // "MFA setup has not been completed for this account yet" — expected
         // first-time-enrollment branch per spec §0.2.2, not shown as an error.
         redirectToMfaSetup();
-        navigate('/mfa/setup', { replace: true });
+        navigate('/mfa/setup', { replace: true, state: forwardAuthRedirect(location.state) });
       } else if (err instanceof ApiError && err.status === 401 && err.message === 'Invalid or expired token') {
         setExpired(true);
         setError('Your session expired, please log in again.');

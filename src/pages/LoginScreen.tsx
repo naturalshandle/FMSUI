@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Sparkles, ArrowRight } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { getPostLoginPath, forwardAuthRedirect } from '@/lib/authRedirect';
 
 export function LoginScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, authLoading, authError } = useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,8 +23,8 @@ export function LoginScreen() {
     if (Object.keys(newErrors).length > 0) return;
 
     const outcome = await login(email.trim(), password);
-    if (outcome === 'AUTHENTICATED') navigate('/');
-    else if (outcome === 'MFA_REQUIRED') navigate('/mfa/verify');
+    if (outcome === 'AUTHENTICATED') navigate(getPostLoginPath(location.state));
+    else if (outcome === 'MFA_REQUIRED') navigate('/mfa/verify', { state: forwardAuthRedirect(location.state) });
   };
 
   return (

@@ -6,6 +6,8 @@ import {
   FileText,
   Camera,
   CheckCircle2,
+  CalendarClock,
+  CalendarX2,
   type LucideIcon,
 } from 'lucide-react';
 import type { Notification, NotificationType } from '@/lib/notificationsApi';
@@ -22,6 +24,8 @@ const iconByType: Record<NotificationType, LucideIcon> = {
   SALON_TRANSFERRED: Scissors,
   AGREEMENT_RENEWED: FileText,
   AGREEMENT_TERMINATED: FileText,
+  AGREEMENT_EXPIRING_SOON: CalendarClock,
+  AGREEMENT_EXPIRED: CalendarX2,
   DOCUMENT_VERIFIED: FileText,
   DOCUMENT_REJECTED: FileText,
   DOCUMENT_REPLACED: FileText,
@@ -29,6 +33,21 @@ const iconByType: Record<NotificationType, LucideIcon> = {
   SALON_AUDIT_STARTED: Camera,
   SALON_AUDIT_SUBMITTED: Camera,
   SALON_AUDIT_REVIEWED: Camera,
+};
+
+/** Types that get their own color + a short label above the message; everything
+ * else uses the default brand styling with no label. */
+const emphasisByType: Partial<Record<NotificationType, { label: string; iconClasses: string; labelClasses: string }>> = {
+  AGREEMENT_EXPIRING_SOON: {
+    label: 'Agreement expiring',
+    iconClasses: 'bg-amber-50 text-amber-600',
+    labelClasses: 'text-amber-700',
+  },
+  AGREEMENT_EXPIRED: {
+    label: 'Agreement expired',
+    iconClasses: 'bg-red-50 text-red-600',
+    labelClasses: 'text-red-700',
+  },
 };
 
 /** Small, dependency-free "time ago" formatter — matches the granularity used in
@@ -54,6 +73,7 @@ interface Props {
 
 export function NotificationRow({ notification, onClick }: Props) {
   const Icon = iconByType[notification.type] ?? Bell;
+  const emphasis = emphasisByType[notification.type];
   return (
     <button
       type="button"
@@ -62,10 +82,15 @@ export function NotificationRow({ notification, onClick }: Props) {
         !notification.read ? 'bg-brand-50/30' : ''
       }`}
     >
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          emphasis?.iconClasses ?? 'bg-brand-50 text-brand-600'
+        }`}
+      >
         <Icon className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
+        {emphasis && <p className={`text-[11px] font-semibold uppercase tracking-wide ${emphasis.labelClasses}`}>{emphasis.label}</p>}
         <p className={`text-sm ${!notification.read ? 'font-semibold text-ink' : 'text-ink-secondary'}`}>
           {notification.message}
         </p>

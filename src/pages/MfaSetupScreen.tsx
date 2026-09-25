@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import QRCode from 'qrcode';
 import { ShieldCheck, ArrowRight, Copy, Check } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { ApiError } from '@/lib/api';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { getPostLoginPath, forwardAuthRedirect } from '@/lib/authRedirect';
 
 const TOTP_PATTERN = /^\d{6}$/;
 
 export function MfaSetupScreen() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { pendingMfa, fetchMfaSetupInfo, enableMfaSetup, verifyMfaLogin, cancelMfa } = useApp();
 
   const [secret, setSecret] = useState<string | null>(null);
@@ -52,12 +54,12 @@ export function MfaSetupScreen() {
   }, []);
 
   if (!pendingMfa || pendingMfa.kind !== 'SETUP') {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={forwardAuthRedirect(location.state)} />;
   }
 
   const handleBackToLogin = () => {
     cancelMfa();
-    navigate('/login', { replace: true });
+    navigate('/login', { replace: true, state: forwardAuthRedirect(location.state) });
   };
 
   const handleCopySecret = async () => {
@@ -86,7 +88,7 @@ export function MfaSetupScreen() {
         setPhase('verify');
       } else {
         await verifyMfaLogin(totp);
-        navigate('/');
+        navigate(getPostLoginPath(location.state));
       }
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {

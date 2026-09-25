@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck } from 'lucide-react';
 import { NotificationRow } from '@/components/domain/NotificationRow';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { ApiError } from '@/lib/api';
 import {
   listNotifications,
@@ -13,8 +14,9 @@ import {
 } from '@/lib/notificationsApi';
 
 // Poll the lightweight unread-count endpoint on an interval so the badge stays
-// roughly live; the list endpoint is only ever fetched while the panel is open.
-const POLL_INTERVAL_MS = 45_000;
+// roughly live (plus on window focus); the list endpoint is only ever fetched
+// while the panel is open.
+const POLL_INTERVAL_MS = 60_000;
 const PANEL_PAGE_SIZE = 10;
 
 export function NotificationBell() {
@@ -25,6 +27,9 @@ export function NotificationBell() {
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     const refresh = () => {
@@ -34,7 +39,11 @@ export function NotificationBell() {
     };
     refresh();
     const interval = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -57,9 +66,33 @@ export function NotificationBell() {
     setLoading(true);
     setError(null);
     listNotifications(0, PANEL_PAGE_SIZE)
-      .then((page) => setItems(page.content))
+      .then((result) => {
+        setItems(result.content);
+        setPage(0);
+        setHasMore(!result.last);
+      })
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load notifications.'))
       .finally(() => setLoading(false));
+  };
+
+  const loadMore = () => {
+    const next = page + 1;
+    setLoadingMore(true);
+    listNotifications(next, PANEL_PAGE_SIZE)
+      .then((result) => {
+        // New notifications may have arrived since page 0, shifting the page
+        // boundaries, so drop any id we already show.
+        setItems((prev) => {
+          const seen = new Set(prev.map((it) => it.id));
+          return [...prev, ...result.content.filter((it) => !seen.has(it.id))];
+        });
+        setPage(next);
+        setHasMore(!result.last);
+      })
+      .catch(() => {
+        // Leave the button in place so the user can retry.
+      })
+      .finally(() => setLoadingMore(false));
   };
 
   const handleToggle = () => {
@@ -131,13 +164,37 @@ export function NotificationBell() {
 
           <div className="max-h-96 overflow-y-auto divide-y divide-brand-50">
             {loading ? (
-              <p className="px-4 py-6 text-sm text-ink-secondary text-center">Loading...</p>
+              <div className="space-y-3 px-4 py-3">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <Skeleton className="h-8 w-8 shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-3.5 w-full" />
+                      <Skeleton className="h-3 w-16" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : error ? (
               <p className="px-4 py-6 text-sm text-ink-secondary text-center">{error}</p>
             ) : items.length === 0 ? (
               <p className="px-4 py-6 text-sm text-ink-secondary text-center">You're all caught up.</p>
             ) : (
-              items.map((n) => <NotificationRow key={n.id} notification={n} onClick={handleRowClick} />)
+              <>
+                {items.map((n) => (
+                  <NotificationRow key={n.id} notification={n} onClick={handleRowClick} />
+                ))}
+                {hasMore && (
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="block w-full px-4 py-2.5 text-center text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50 transition-colors"
+                  >
+                    {loadingMore ? 'Loading...' : 'Load more'}
+                  </button>
+                )}
+              </>
             )}
           </div>
 

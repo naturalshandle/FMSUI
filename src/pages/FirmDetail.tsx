@@ -204,31 +204,33 @@ export function FirmDetail() {
               {firm.owners.map((owner) => (
                 <div
                   key={owner.franchiseeId}
-                  className="flex items-center gap-4 rounded-xl border border-brand-50 bg-surface-subtle px-5 py-4"
+                  className="flex flex-col sm:flex-row sm:items-center gap-4 rounded-xl border border-brand-50 bg-surface-subtle px-5 py-4"
                 >
-                  <div
-                    onClick={() => navigate(`/franchisee/${owner.franchiseeId}`)}
-                    className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-brand-400 text-white font-semibold cursor-pointer shrink-0"
-                  >
-                    {(owner.franchiseeName ?? owner.franchiseeId).slice(0, 2).toUpperCase()}
-                  </div>
-                  <div
-                    onClick={() => navigate(`/franchisee/${owner.franchiseeId}`)}
-                    className="flex-1 min-w-0 cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium text-ink">
-                        {owner.franchiseeName ?? `Franchisee #${owner.franchiseeId}`}
-                      </p>
-                      {owner.isPrimary && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 text-brand-700 px-2.5 py-0.5 text-xs font-medium">
-                          <Star className="h-3 w-3 fill-current" />
-                          Primary
-                        </span>
-                      )}
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div
+                      onClick={() => navigate(`/franchisee/${owner.franchiseeId}`)}
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-brand-400 text-white font-semibold cursor-pointer shrink-0"
+                    >
+                      {(owner.franchiseeName ?? owner.franchiseeId).slice(0, 2).toUpperCase()}
+                    </div>
+                    <div
+                      onClick={() => navigate(`/franchisee/${owner.franchiseeId}`)}
+                      className="flex-1 min-w-0 cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-ink">
+                          {owner.franchiseeName ?? `Franchisee #${owner.franchiseeId}`}
+                        </p>
+                        {owner.isPrimary && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 text-brand-700 px-2.5 py-0.5 text-xs font-medium">
+                            <Star className="h-3 w-3 fill-current" />
+                            Primary
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 flex-wrap sm:shrink-0 sm:ml-auto">
                     {!owner.isPrimary && (
                       <Button
                         size="sm"

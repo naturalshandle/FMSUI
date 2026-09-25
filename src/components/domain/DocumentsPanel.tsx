@@ -163,7 +163,7 @@ export function DocumentsPanel({ entityType, entityId }: Props) {
                   {doc.supersededByDocumentId && ' · Superseded by a newer version'}
                 </p>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <Button size="sm" variant="ghost" onClick={() => handleDownload(doc)}>
                   <Download className="h-3.5 w-3.5" />
                   Download

@@ -25,6 +25,7 @@ import { useToast } from '@/components/ui/Toast';
 import { StatusBadge, type StatusBucket } from '@/components/ui/StatusBadge';
 import { DocumentsPanel } from '@/components/domain/DocumentsPanel';
 import { SalonAuditsSection } from '@/components/domain/SalonAuditsSection';
+import { AgreementExpiryChip } from '@/components/domain/AgreementExpiryChip';
 import { getSalon, transferSalon } from '@/lib/salonsApi';
 import { searchFirms } from '@/lib/firmsApi';
 import { listOfficials } from '@/lib/officialsApi';
@@ -375,9 +376,9 @@ export function SalonDetail() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold text-ink">Current Agreement</span>
                   <StatusBadge bucket={agreementStatusBucket[currentAgreement.status]} label={currentAgreement.status} />
-                  {currentAgreement.isExpired && <StatusBadge bucket="computed" label="Expired" />}
+                  <AgreementExpiryChip agreement={currentAgreement} />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="secondary" disabled={currentAgreement.status !== 'ACTIVE'} onClick={() => openEditAgreement(currentAgreement)}>
                     Edit
                   </Button>
@@ -543,7 +544,7 @@ export function SalonDetail() {
         onPrimary={handleRenew}
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input label="Valid From" type="date" value={renewForm.validFrom} onChange={(e) => setRenewForm({ ...renewForm, validFrom: e.target.value })} />
             <Input label="New Valid Till" type="date" value={renewForm.newValidTill} onChange={(e) => setRenewForm({ ...renewForm, newValidTill: e.target.value })} />
           </div>

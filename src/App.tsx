@@ -23,9 +23,11 @@ import { RoyaltyApprovals } from '@/pages/RoyaltyApprovals';
 import { FranchiseCreationDraftList } from '@/pages/FranchiseCreationDraftList';
 import { FranchiseCreationWizard } from '@/pages/FranchiseCreationWizard';
 import { NotificationsList } from '@/pages/NotificationsList';
+import { AgreementDetail } from '@/pages/AgreementDetail';
 import { RequireRole } from '@/components/routing/RequireRole';
 import { ErrorBoundary } from '@/components/routing/ErrorBoundary';
 import { STAFF_ROLES, ADMIN_ROLES } from '@/lib/roles';
+import { getPostLoginPath } from '@/lib/authRedirect';
 
 // Admin decides, State Head recommends, RM/CM see their own open requests.
 const ROYALTY_APPROVAL_ROLES = STAFF_ROLES;
@@ -46,8 +48,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
 
 function RedirectIfAuthed({ children }: { children: ReactNode }) {
   const { currentUser, authInitializing } = useApp();
+  const location = useLocation();
   if (authInitializing) return null;
-  if (currentUser) return <Navigate to="/" replace />;
+  if (currentUser) return <Navigate to={getPostLoginPath(location.state)} replace />;
   return <>{children}</>;
 }
 
@@ -71,6 +74,8 @@ function AppRoutes() {
       <Route path="/firm/:id" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><FirmDetail /></RequireRole></RequireAuth>} />
       <Route path="/salons" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><SalonManagement /></RequireRole></RequireAuth>} />
       <Route path="/salon/:id" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><SalonDetail /></RequireRole></RequireAuth>} />
+      {/* Linked from agreement expiry-reminder emails — keep this path stable. */}
+      <Route path="/agreements/:id" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><AgreementDetail /></RequireRole></RequireAuth>} />
       <Route path="/admin-users" element={<RequireAuth><RequireRole roles={ADMIN_ROLES}><AdminUserManagement /></RequireRole></RequireAuth>} />
       <Route path="/officials" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><OfficialsManagement /></RequireRole></RequireAuth>} />
       <Route path="/notifications" element={<RequireAuth><RequireRole roles={STAFF_ROLES}><NotificationsList /></RequireRole></RequireAuth>} />
